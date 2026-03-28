@@ -74,7 +74,7 @@
 	<div id="fade-overlay"></div>
 	<script>
 
-		const APP_VERSION = "1.27"; // <-- Change this value in one place
+		const APP_VERSION = "0.01"; // <-- Change this value in one place
 	</script>
 
 	<div id="description-display">Hover over an element for details.</div>
@@ -101,6 +101,106 @@
 
 	<div id="description-display"></div>
 	<div id="debug-display"></div>
+
+	<!-- Light Position Editor -->
+	<style>
+		#light-editor {
+			position: fixed;
+			bottom: 20px;
+			left: 20px;
+			background: rgba(0,0,0,0.8);
+			border: 1px solid #48f9ff;
+			border-radius: 4px;
+			color: #48f9ff;
+			font-family: monospace;
+			font-size: 12px;
+			z-index: 500;
+			min-width: 260px;
+		}
+		#light-editor-header {
+			padding: 8px 12px;
+			cursor: pointer;
+			user-select: none;
+			border-bottom: 1px solid #48f9ff44;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		#light-editor-body {
+			padding: 10px 12px;
+			display: none;
+		}
+		#light-editor-body.open { display: block; }
+		.light-row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 8px;
+		}
+		.light-row label { width: 14px; }
+		.light-row input[type=range] { flex: 1; accent-color: #48f9ff; }
+		.light-row .val { width: 60px; text-align: right; }
+		#light-coords {
+			margin-top: 8px;
+			padding-top: 8px;
+			border-top: 1px solid #48f9ff44;
+			word-break: break-all;
+		}
+	</style>
+	<div id="light-editor">
+		<div id="light-editor-header">
+			<span>Directional Light</span>
+			<span id="light-editor-toggle">▲</span>
+		</div>
+		<div id="light-editor-body">
+			<div class="light-row">
+				<label>X</label>
+				<input type="range" id="light-x" min="-200" max="200" step="0.5" value="5">
+				<span class="val" id="light-x-val">5</span>
+			</div>
+			<div class="light-row">
+				<label>Y</label>
+				<input type="range" id="light-y" min="-200" max="200" step="0.5" value="100">
+				<span class="val" id="light-y-val">100</span>
+			</div>
+			<div class="light-row">
+				<label>Z</label>
+				<input type="range" id="light-z" min="-200" max="200" step="0.5" value="20.5">
+				<span class="val" id="light-z-val">20.5</span>
+			</div>
+			<div id="light-coords">.position.set(5, 100, 20.5)</div>
+		</div>
+	</div>
+	<script>
+		(function() {
+			const header = document.getElementById('light-editor-header');
+			const body = document.getElementById('light-editor-body');
+			const toggle = document.getElementById('light-editor-toggle');
+
+			header.addEventListener('click', () => {
+				const open = body.classList.toggle('open');
+				toggle.textContent = open ? '▼' : '▲';
+			});
+
+			function updateLight() {
+				const light = window._debugDirectionalLight;
+				if (!light) return;
+				const x = parseFloat(document.getElementById('light-x').value);
+				const y = parseFloat(document.getElementById('light-y').value);
+				const z = parseFloat(document.getElementById('light-z').value);
+				light.position.set(x, y, z);
+				document.getElementById('light-x-val').textContent = x;
+				document.getElementById('light-y-val').textContent = y;
+				document.getElementById('light-z-val').textContent = z;
+				document.getElementById('light-coords').textContent =
+					`.position.set(${x}, ${y}, ${z})`;
+			}
+
+			['light-x','light-y','light-z'].forEach(id => {
+				document.getElementById(id).addEventListener('input', updateLight);
+			});
+		})();
+	</script>
 
 </body>
 

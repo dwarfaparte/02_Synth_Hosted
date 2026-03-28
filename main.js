@@ -524,8 +524,9 @@ let ambientLight = new THREE.AmbientLight(0xffffff, PULSE_MIN_INTENSITY);
 scene.add(ambientLight);
 
 const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
-directionalLight.position.set(5, 100, 20.5);
+directionalLight.position.set(5, 117.5, -136.5)
 scene.add(directionalLight);
+window._debugDirectionalLight = directionalLight;
 
 // 3. Load the Model
 const loader = new GLTFLoader();
