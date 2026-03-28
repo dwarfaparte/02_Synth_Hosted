@@ -18,6 +18,10 @@ const B_Group_1 = ['B_Soft01', 'B_Soft02', 'B_Soft03', 'B_Soft04'];
 const B_Group_2 = ['B_Soft05', 'B_Soft06', 'B_Soft07', 'B_Soft08'];
 const B_Group_3 = ['B_TimeMod', 'B_Gate', 'B_Accent', 'B_Glide', 'B_Octave', 'B_NoteSynth'];
 
+// Display mode tracking
+let activeMode = 'B_Seq';
+let activeSoftPage = '01';
+
 //  Drag and Rotation Variablse
 let isDragging = false;
 const previousMousePosition = {
@@ -592,7 +596,7 @@ loader.load(
             setButtonLEDs([buttonName], 0, 5); // Green= 0, Red = 5 for Red state
             softButtonStates.set(buttonName, 1); // Logical state 0 for Red       
         });
-        updateDisplays("B_TimeMod_Green");
+        updateDisplays("B_Seq_01");
     },
     undefined,
     function (error) {
@@ -798,7 +802,8 @@ function checkIntersections(isClick = false) {
                 if (objectToCheck.name.includes('Knob')
                     || objectToCheck.name === 'Display01'
                     || objectToCheck.name === 'Display02'
-                    || objectToCheck.name.includes('B_')) {
+                    || objectToCheck.name.includes('B_')
+                    || objectToCheck.name.startsWith('Bb_')) {
                     hoveredInteractive = objectToCheck; // Found an object
                     console.log('Hovered object name:', objectToCheck.name);
                     const worldPos = new THREE.Vector3();
@@ -877,6 +882,16 @@ function checkIntersections(isClick = false) {
         return; // Stop processing, we've handled the display click
     }
 
+    // --- Bb_Soft PAGE SELECT LOGIC ---
+    if (isClick && hoveredInteractive && hoveredInteractive.name.startsWith('Bb_Soft_')) {
+        const pageNum = hoveredInteractive.name.split('_').pop(); // '01', '02', '03', '04'
+        activeSoftPage = pageNum;
+        updateDisplays(`${activeMode}_${activeSoftPage}`);
+        selectedObject = null;
+        outlinePass.selectedObjects = [];
+        return;
+    }
+
     // --- SOFT BUTTON CLICK LOGIC --
     if (isClick && hoveredInteractive && hoveredInteractive.name.includes('B_')) {
         const buttonName = hoveredInteractive.name;
@@ -898,31 +913,21 @@ function checkIntersections(isClick = false) {
         // 3. Apply the new emission intensity based on the state
         resetButtonLEDs(buttonName); // Reset other buttons in the group first
 
-        // --- NEW: Determine LED string and screen key ---
-        let ledStateString = "";
-
         switch (currentState) {
             case 0:
-                // State 0: Red dim (0), Green dim (0)
                 setButtonLEDs([buttonName], 0, 0);
-                ledStateString = "Off"; // State 1 maps to "Off"
                 break;
             case 1:
-                // State 1: Red bright (5), Green dim (0)
                 setButtonLEDs([buttonName], 0, 5);
-                ledStateString = "Red"; // State 1 maps to "Red"
                 break;
             case 2:
-                // State 0: Green bright (5), Red dim (0)
                 setButtonLEDs([buttonName], 5, 0);
-                ledStateString = "Green"; // State 0 maps to "Green"
+                activeMode = buttonName;
                 break;
-
         }
 
-        // --- NEW: Construct the key and update the displays ---
-        const screenKey = `${buttonName}_${ledStateString}`;
-        updateDisplays(screenKey);
+        // Update display using active mode + active page
+        updateDisplays(`${activeMode}_${activeSoftPage}`);
         // --- END NEW ---
 
         // Clear hover/selection effect immediately after click
