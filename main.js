@@ -281,17 +281,17 @@ function parseDisplayCSV(csvText) {
         line.split(',').map(cell => cell.trim().replace(/^"|"$/g, ''))
     );
 
-    if (allLines.length < 15) {
-        console.error('parseDisplayCSV: File is too short! Expected at least 15 lines.');
+    if (allLines.length < 7) {
+        console.error('parseDisplayCSV: File is too short! Expected at least 7 lines.');
         return combinedScreensMap;
     }
 
     // 2. Get the key definitions from the first row
     const headerParts = allLines[0];
 
-    // 3. Get the data blocks for D1 and D2
+    // 3. Get the data blocks for D1 and (optionally) D2
     const d1DataLines = allLines.slice(1, 7);  // Rows 2-7
-    const d2DataLines = allLines.slice(9, 15); // Rows 10-15
+    const d2DataLines = allLines.length >= 15 ? allLines.slice(9, 15) : d1DataLines.map(() => []);
 
     // 4. Iterate over the header columns, stepping 6 columns at a time
     // (Each screen block is 6 columns wide: Key + 4 data cols + 1 blank separator col)
@@ -526,7 +526,6 @@ scene.add(ambientLight);
 const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
 directionalLight.position.set(5, 117.5, -136.5)
 scene.add(directionalLight);
-window._debugDirectionalLight = directionalLight;
 
 // 3. Load the Model
 const loader = new GLTFLoader();
@@ -849,25 +848,21 @@ function checkIntersections(isClick = false) {
         modelToFadeIn.updateMatrixWorld(true);
         // --- END FIX ---
 
-        // --- 1. Get the Knob10 object ---
-        const targetObject = scene.getObjectByName("Knob10");
+        // --- 1. Get the Display01 anchor object ---
+        const targetObject = scene.getObjectByName("Display01");
         if (!targetObject) {
-            console.error("Could not find 'Knob10' to focus on!");
+            console.error("Could not find 'Display01' to focus on!");
             modelToFadeIn.rotation.y = originalModelRotationY;
-            // ---
             return;
         }
 
         // Calculate target camera position slightly in front of the display
         const displayWorldPos = new THREE.Vector3();
-
-        // This will  get the knob's position as-if the model was at Y=0
         targetObject.getWorldPosition(displayWorldPos);
 
         const displayNormal = new THREE.Vector3(0, 1, 0);
         displayNormal.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
-        const offsetDistance = 15;
-        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, offsetDistance);
+        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, 15);
 
         // Look directly at the center of the display
         targetLookAt.copy(displayWorldPos);
@@ -976,7 +971,7 @@ function checkIntersections(isClick = false) {
     }
 }
 
-// Main Loop 
+// Main Loop
 function animate() {
     requestAnimationFrame(animate);
 
