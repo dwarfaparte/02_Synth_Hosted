@@ -17,6 +17,7 @@ let hoveredInteractive = null;
 const B_Group_1 = ['B_Soft01', 'B_Soft02', 'B_Soft03', 'B_Soft04'];
 const B_Group_2 = ['B_Soft05', 'B_Soft06', 'B_Soft07', 'B_Soft08'];
 const B_Group_3 = ['B_TimeMod', 'B_Gate', 'B_Accent', 'B_Glide', 'B_Octave', 'B_NoteSynth'];
+const B_Group_Mode = ['B_Seq', 'B_Samp', 'B_Snth', 'B_Perf'];
 
 // Display mode tracking
 let activeMode = 'B_Seq';
@@ -40,7 +41,7 @@ let softButtonStates = new Map(); // Key: Object Name (e.g., 'soft1'), Value: St
 
 // LED Functions
 function resetButtonLEDs(targetButton) {
-    const grouplist = [B_Group_1, B_Group_2, B_Group_3];
+    const grouplist = [B_Group_1, B_Group_2, B_Group_3, B_Group_Mode];
 
     // Find targetButton in groups
     for (const group of grouplist) {
@@ -54,6 +55,27 @@ function resetButtonLEDs(targetButton) {
             }
         }
     }
+}
+
+// Updates Bb_Soft button appearance: reduces reflectivity on all, brightens the active one.
+function setBbSoftActive(activePageNum) {
+    const buttons = ['Bb_Soft_01', 'Bb_Soft_02', 'Bb_Soft_03', 'Bb_Soft_04'];
+    buttons.forEach(name => {
+        const obj = scene.getObjectByName(name);
+        if (!obj) return;
+        const isActive = name.endsWith(`_${activePageNum}`);
+        obj.traverse(child => {
+            if (!child.isMesh) return;
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(mat => {
+                mat.roughness = 0.85;
+                mat.metalness = 0.1;
+                mat.emissive = new THREE.Color(0x48f9ff);
+                mat.emissiveIntensity = isActive ? 1.2 : 0;
+                mat.needsUpdate = true;
+            });
+        });
+    });
 }
 
 // Sets the LED brightness for a list of soft buttons by name.
@@ -235,6 +257,37 @@ let currentScreenKey = 'B_Seq_01';
 window._allDisplayScreensData = allDisplayScreensData;
 window._getCurrentScreenKey = () => currentScreenKey;
 window._refreshDisplay = () => updateDisplays(currentScreenKey);
+
+window._exportDisplaysCSV = function () {
+    const d1Map = allDisplayScreensData.get('Display01');
+    if (!d1Map || d1Map.size === 0) return '';
+
+    const screenKeys = [...d1Map.keys()];
+    const totalCols = screenKeys.length * 6;
+    // 1 header row + 6 data rows
+    const rows = Array.from({ length: 7 }, () => Array(totalCols).fill(''));
+
+    screenKeys.forEach((key, screenIdx) => {
+        const colBase = screenIdx * 6;
+        const cells = d1Map.get(key); // 8x3 array
+
+        rows[0][colBase + 1] = key;
+
+        // Inverse of processGridData:
+        // CSV rows 1-3 → line 0,1,2 for display blocks 0-3 (top row)
+        // CSV rows 4-6 → line 0,1,2 for display blocks 4-7 (bottom row)
+        for (let lineIdx = 0; lineIdx < 3; lineIdx++) {
+            for (let blockCol = 0; blockCol < 4; blockCol++) {
+                rows[1 + lineIdx][colBase + 1 + blockCol] = cells[blockCol]?.[lineIdx] || '';
+                rows[4 + lineIdx][colBase + 1 + blockCol] = cells[4 + blockCol]?.[lineIdx] || '';
+            }
+        }
+    });
+
+    return rows.map(row =>
+        row.map(cell => (cell.includes(',') || cell.includes('"')) ? `"${cell}"` : cell).join(',')
+    ).join('\n');
+};
 
 /**
  * Parses a 6x4 grid of CSV cells into the 8x3 block array needed by createTextTexture.
@@ -499,6 +552,16 @@ let lerpedCameraUp = new THREE.Vector3(0, 1, 0); // <-- NEW: Smoothed "up" vecto
 let targetModelRotationY = 0;
 const CAMERA_FOCUS_SPEED = 0.05; // Speed for smooth transition (0 to 1)
 
+// Display zoom tuning config
+const displayZoomConfig = {
+    targetName: "Display01",
+    normalX: 0, normalY: 1, normalZ: 0,
+    offsetDist: 15,
+    lookAtOffsetX: 0, lookAtOffsetY: 0, lookAtOffsetZ: 0,
+    upX: 0, upY: 0, upZ: -1
+};
+window._displayZoomConfig = displayZoomConfig;
+
 // 1. Setup the Scene, Camera, and Renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 1000)
@@ -590,17 +653,22 @@ loader.load(
 
         scene.add(modelToFadeIn);
 
-        // Set Button intial states
+        // Set Button initial states
         const Start_Group = ['B_Soft01', 'B_Soft05', 'B_TimeMod'];
 
-        // Set all buttons in the groups to initial Green state
         Start_Group.forEach(buttonName => {
             resetButtonLEDs(buttonName);
-            setButtonLEDs([buttonName], 0, 5); // Green= 0, Red = 5 for Red state
-            softButtonStates.set(buttonName, 1); // Logical state 0 for Red       
+            setButtonLEDs([buttonName], 0, 5);
+            softButtonStates.set(buttonName, 1);
         });
+
+        // B_Seq starts green (active mode)
+        resetButtonLEDs('B_Seq');
+        setButtonLEDs(['B_Seq'], 5, 0);
+        softButtonStates.set('B_Seq', 2);
         updateDisplays("B_Seq_01");
         setTimeout(() => updateDisplays("B_Seq_01"), 500);
+        setBbSoftActive('01');
     },
     undefined,
     function (error) {
@@ -835,7 +903,7 @@ function checkIntersections(isClick = false) {
         if (intersects.length > 0 && intersects[0].uv && window._openCellEditor) {
             const uv = intersects[0].uv;
             const col = Math.min(Math.floor(uv.x * 4), 3);
-            const row = uv.y > 0.5 ? 0 : 1;
+            const row = uv.y > 0.5 ? 1 : 0;
             window._openCellEditor(hoveredInteractive.name, row * 4 + col);
         }
         return;
@@ -862,27 +930,25 @@ function checkIntersections(isClick = false) {
         modelToFadeIn.updateMatrixWorld(true);
         // --- END FIX ---
 
-        // --- 1. Get the Display01 anchor object ---
-        const targetObject = scene.getObjectByName("Display01");
+        // --- 1. Get the anchor object ---
+        const targetObject = scene.getObjectByName(displayZoomConfig.targetName);
         if (!targetObject) {
-            console.error("Could not find 'Display01' to focus on!");
+            console.error(`Could not find '${displayZoomConfig.targetName}' to focus on!`);
             modelToFadeIn.rotation.y = originalModelRotationY;
             return;
         }
 
-        // Calculate target camera position slightly in front of the display
         const displayWorldPos = new THREE.Vector3();
         targetObject.getWorldPosition(displayWorldPos);
 
-        const displayNormal = new THREE.Vector3(0, 1, 0);
+        const displayNormal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
         displayNormal.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
-        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, 15);
+        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, displayZoomConfig.offsetDist);
 
-        // Look directly at the center of the display
-        targetLookAt.copy(displayWorldPos);
+        const lookAtOffset = new THREE.Vector3(displayZoomConfig.lookAtOffsetX, displayZoomConfig.lookAtOffsetY, displayZoomConfig.lookAtOffsetZ);
+        targetLookAt.copy(displayWorldPos).add(lookAtOffset);
 
-        // Set camera "up" vector to match display's up direction
-        const displayUp = new THREE.Vector3(0, 0, -1);
+        const displayUp = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
         displayUp.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
         targetCameraUp.copy(displayUp);
 
@@ -896,6 +962,7 @@ function checkIntersections(isClick = false) {
         const pageNum = hoveredInteractive.name.split('_').pop(); // '01', '02', '03', '04'
         activeSoftPage = pageNum;
         updateDisplays(`${activeMode}_${activeSoftPage}`);
+        setBbSoftActive(pageNum);
         selectedObject = null;
         outlinePass.selectedObjects = [];
         return;
@@ -910,10 +977,12 @@ function checkIntersections(isClick = false) {
         // If undefined (for a button not set at init), default to 1 (Red)
         if (currentState === undefined) currentState = 0;
 
-        // 2. Cycle the state 
-        currentState = (currentState + 1);
-        if (currentState > 2) {
-            currentState = 1;
+        // 2. Cycle the state (mode buttons are off/green only, others cycle off→red→green)
+        if (B_Group_Mode.includes(buttonName)) {
+            currentState = currentState === 2 ? 0 : 2;
+        } else {
+            currentState = (currentState + 1);
+            if (currentState > 2) currentState = 1;
         }
         softButtonStates.set(buttonName, currentState);
 
@@ -954,6 +1023,35 @@ function checkIntersections(isClick = false) {
         outlinePass.selectedObjects = [];
     }
 }
+
+window._retriggerDisplayZoom = function () {
+    if (!modelToFadeIn) return;
+    isCameraFocused = true;
+    isCameraTransitioning = true;
+    rotationVelocityY = 0;
+    targetModelRotationY = 0;
+    const savedRotY = modelToFadeIn.rotation.y;
+    modelToFadeIn.rotation.y = 0;
+    modelToFadeIn.updateMatrixWorld(true);
+
+    const targetObject = scene.getObjectByName(displayZoomConfig.targetName);
+    if (!targetObject) {
+        console.error(`Retrigger: Could not find '${displayZoomConfig.targetName}'`);
+        modelToFadeIn.rotation.y = savedRotY;
+        return;
+    }
+    const displayWorldPos = new THREE.Vector3();
+    targetObject.getWorldPosition(displayWorldPos);
+    const displayNormal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
+    displayNormal.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
+    targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, displayZoomConfig.offsetDist);
+    const lookAtOffset = new THREE.Vector3(displayZoomConfig.lookAtOffsetX, displayZoomConfig.lookAtOffsetY, displayZoomConfig.lookAtOffsetZ);
+    targetLookAt.copy(displayWorldPos).add(lookAtOffset);
+    const displayUp = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
+    displayUp.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
+    targetCameraUp.copy(displayUp);
+    modelToFadeIn.rotation.y = savedRotY;
+};
 
 // Main Loop
 function animate() {

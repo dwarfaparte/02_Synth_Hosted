@@ -20,6 +20,24 @@
 			display: block;
 		}
 
+		#export-csv-btn {
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			padding: 8px 14px;
+			background: rgba(0, 0, 0, 0.8);
+			color: #48f9ff;
+			border: 1px solid #48f9ff;
+			border-radius: 4px;
+			font-family: monospace;
+			font-size: 12px;
+			cursor: pointer;
+			z-index: 500;
+		}
+		#export-csv-btn:hover {
+			background: rgba(72, 249, 255, 0.15);
+		}
+
 #start-overlay {
 			position: absolute;
 			top: 0;
@@ -82,9 +100,8 @@
 		#cell-editor {
 			display: none;
 			position: fixed;
-			top: 50%;
-			left: 50%;
-			transform: translate(-50%, -50%);
+			top: 20px;
+			left: 20px;
 			background: rgba(0, 0, 0, 0.92);
 			border: 1px solid #48f9ff;
 			border-radius: 4px;
@@ -131,6 +148,13 @@
 			padding: 0;
 			line-height: 1;
 		}
+		#cell-editor-tip {
+			padding: 6px 12px;
+			border-top: 1px solid #48f9ff22;
+			color: #48f9ff55;
+			font-size: 10px;
+			text-align: center;
+		}
 	</style>
 
 	<div id="cell-editor">
@@ -143,7 +167,40 @@
 			<input type="text" id="cell-l2" placeholder="Line 2" maxlength="10" autocomplete="off" spellcheck="false">
 			<input type="text" id="cell-l3" placeholder="Line 3" maxlength="10" autocomplete="off" spellcheck="false">
 		</div>
+		<div id="cell-editor-tip">Press Enter to Confirm</div>
 	</div>
+
+	<button id="export-csv-btn">export.csv</button>
+
+	<script>
+		document.getElementById('export-csv-btn').addEventListener('click', async () => {
+			const csv = window._exportDisplaysCSV ? window._exportDisplaysCSV() : '';
+			if (!csv) { alert('No display data to export.'); return; }
+
+			if (window.showSaveFilePicker) {
+				try {
+					const handle = await window.showSaveFilePicker({
+						suggestedName: 'displays.csv',
+						types: [{ description: 'CSV File', accept: { 'text/csv': ['.csv'] } }]
+					});
+					const writable = await handle.createWritable();
+					await writable.write(csv);
+					await writable.close();
+				} catch (e) {
+					if (e.name !== 'AbortError') console.error('Save failed:', e);
+				}
+			} else {
+				// Fallback for browsers without File System Access API
+				const blob = new Blob([csv], { type: 'text/csv' });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = 'displays.csv';
+				a.click();
+				URL.revokeObjectURL(url);
+			}
+		});
+	</script>
 
 	<script>
 		(function () {
@@ -194,9 +251,174 @@
 			});
 
 			document.addEventListener('keydown', e => {
-				if (e.key === 'Escape') {
+				if (e.key === 'Escape' || e.key === 'Enter') {
 					document.getElementById('cell-editor').style.display = 'none';
 				}
+			});
+		})();
+	</script>
+
+	<!-- Display Zoom Tuner -->
+	<style>
+		#zoom-editor {
+			position: fixed;
+			bottom: 20px;
+			left: 20px;
+			background: rgba(0,0,0,0.85);
+			border: 1px solid #48f9ff;
+			border-radius: 4px;
+			color: #48f9ff;
+			font-family: monospace;
+			font-size: 11px;
+			z-index: 500;
+			min-width: 280px;
+		}
+		#zoom-editor-header {
+			padding: 8px 12px;
+			cursor: pointer;
+			user-select: none;
+			border-bottom: 1px solid #48f9ff44;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		#zoom-editor-body { padding: 10px 12px; display: none; }
+		#zoom-editor-body.open { display: block; }
+		.ze-section {
+			margin-bottom: 6px;
+			color: #48f9ff88;
+			text-transform: uppercase;
+			font-size: 10px;
+			letter-spacing: 1px;
+		}
+		.ze-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			margin-bottom: 6px;
+		}
+		.ze-row label { width: 60px; }
+		.ze-row input[type=text] {
+			flex: 1;
+			background: #111;
+			color: #48f9ff;
+			border: 1px solid #48f9ff55;
+			padding: 2px 4px;
+			font-family: monospace;
+			font-size: 11px;
+		}
+		.ze-row input[type=range] { flex: 1; accent-color: #48f9ff; }
+		.ze-row .val { width: 48px; text-align: right; }
+		#zoom-output {
+			margin-top: 8px;
+			padding-top: 8px;
+			border-top: 1px solid #48f9ff44;
+			line-height: 1.6;
+			word-break: break-all;
+			color: #48f9ffcc;
+		}
+		#zoom-apply {
+			margin-top: 8px;
+			width: 100%;
+			padding: 5px;
+			background: #001f1f;
+			color: #48f9ff;
+			border: 1px solid #48f9ff;
+			cursor: pointer;
+			font-family: monospace;
+			font-size: 11px;
+		}
+		#zoom-apply:hover { background: #003333; }
+	</style>
+	<div id="zoom-editor">
+		<div id="zoom-editor-header">
+			<span>Display Zoom Tuner</span>
+			<span id="zoom-editor-toggle">▲</span>
+		</div>
+		<div id="zoom-editor-body">
+			<div class="ze-section">Anchor Object</div>
+			<div class="ze-row">
+				<label>Name</label>
+				<input type="text" id="ze-target" value="Display01">
+			</div>
+
+			<div class="ze-section">Approach Normal</div>
+			<div class="ze-row"><label>X</label><input type="range" id="ze-nx" min="-1" max="1" step="0.05" value="0"><span class="val" id="ze-nx-v">0</span></div>
+			<div class="ze-row"><label>Y</label><input type="range" id="ze-ny" min="-1" max="1" step="0.05" value="1"><span class="val" id="ze-ny-v">1</span></div>
+			<div class="ze-row"><label>Z</label><input type="range" id="ze-nz" min="-1" max="1" step="0.05" value="0"><span class="val" id="ze-nz-v">0</span></div>
+
+			<div class="ze-section">Offset Distance</div>
+			<div class="ze-row"><label>Dist</label><input type="range" id="ze-dist" min="1" max="60" step="0.5" value="15"><span class="val" id="ze-dist-v">15</span></div>
+
+			<div class="ze-section">LookAt Offset</div>
+			<div class="ze-row"><label>X</label><input type="range" id="ze-lx" min="-10" max="10" step="0.1" value="0"><span class="val" id="ze-lx-v">0</span></div>
+			<div class="ze-row"><label>Y</label><input type="range" id="ze-ly" min="-10" max="10" step="0.1" value="0"><span class="val" id="ze-ly-v">0</span></div>
+			<div class="ze-row"><label>Z</label><input type="range" id="ze-lz" min="-10" max="10" step="0.1" value="0"><span class="val" id="ze-lz-v">0</span></div>
+
+			<div class="ze-section">Camera Up Vector</div>
+			<div class="ze-row"><label>X</label><input type="range" id="ze-ux" min="-1" max="1" step="0.05" value="0"><span class="val" id="ze-ux-v">0</span></div>
+			<div class="ze-row"><label>Y</label><input type="range" id="ze-uy" min="-1" max="1" step="0.05" value="0"><span class="val" id="ze-uy-v">0</span></div>
+			<div class="ze-row"><label>Z</label><input type="range" id="ze-uz" min="-1" max="1" step="0.05" value="-1"><span class="val" id="ze-uz-v">-1</span></div>
+
+			<button id="zoom-apply">Apply (re-zoom)</button>
+
+			<div id="zoom-output">Adjust sliders then click Apply.</div>
+		</div>
+	</div>
+	<script>
+		(function () {
+			const header = document.getElementById('zoom-editor-header');
+			const body = document.getElementById('zoom-editor-body');
+			const toggle = document.getElementById('zoom-editor-toggle');
+
+			header.addEventListener('click', () => {
+				const open = body.classList.toggle('open');
+				toggle.textContent = open ? '▼' : '▲';
+			});
+
+			const sliders = [
+				['ze-nx','normalX'], ['ze-ny','normalY'], ['ze-nz','normalZ'],
+				['ze-dist','offsetDist'],
+				['ze-lx','lookAtOffsetX'], ['ze-ly','lookAtOffsetY'], ['ze-lz','lookAtOffsetZ'],
+				['ze-ux','upX'], ['ze-uy','upY'], ['ze-uz','upZ'],
+			];
+
+			function syncToConfig() {
+				const cfg = window._displayZoomConfig;
+				if (!cfg) return;
+				cfg.targetName = document.getElementById('ze-target').value.trim();
+				sliders.forEach(([id, key]) => {
+					cfg[key] = parseFloat(document.getElementById(id).value);
+					document.getElementById(id + '-v').textContent = cfg[key];
+				});
+			}
+
+			function updateOutput() {
+				const cfg = window._displayZoomConfig;
+				if (!cfg) return;
+				document.getElementById('zoom-output').textContent =
+					`targetName: "${cfg.targetName}"\n` +
+					`normal: (${cfg.normalX}, ${cfg.normalY}, ${cfg.normalZ})\n` +
+					`offsetDist: ${cfg.offsetDist}\n` +
+					`lookAtOffset: (${cfg.lookAtOffsetX}, ${cfg.lookAtOffsetY}, ${cfg.lookAtOffsetZ})\n` +
+					`up: (${cfg.upX}, ${cfg.upY}, ${cfg.upZ})`;
+			}
+
+			sliders.forEach(([id]) => {
+				document.getElementById(id).addEventListener('input', () => {
+					syncToConfig();
+					updateOutput();
+				});
+			});
+			document.getElementById('ze-target').addEventListener('input', () => {
+				syncToConfig();
+				updateOutput();
+			});
+
+			document.getElementById('zoom-apply').addEventListener('click', () => {
+				syncToConfig();
+				updateOutput();
+				if (window._retriggerDisplayZoom) window._retriggerDisplayZoom();
 			});
 		})();
 	</script>
