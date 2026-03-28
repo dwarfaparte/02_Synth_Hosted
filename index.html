@@ -20,30 +20,7 @@
 			display: block;
 		}
 
-		/* --- Tooltip CSS --- */
-		#description-display {
-			position: fixed;
-			/* Sticks to the viewport */
-			top: 20px;
-			right: 20px;
-			width: 350px;
-			/* Or any width you prefer */
-			padding: 30px 30px;
-			background-color: rgba(0, 0, 0, 0.75);
-			color: #48f9ffff;
-			border: 1px solid #48f9ffff;
-			border-radius: 4px;
-			font-family: Arial, sans-serif;
-			font-size: 34px;
-			pointer-events: none;
-			z-index: 100;
-
-			/* --- NEW LINES FOR "POP" EFFECT --- */
-			transform: scale(1);
-			transition: transform 0.2s ease-out;
-		}
-
-		#start-overlay {
+#start-overlay {
 			position: absolute;
 			top: 0;
 			left: 0;
@@ -77,7 +54,6 @@
 		const APP_VERSION = "0.01"; // <-- Change this value in one place
 	</script>
 
-	<div id="description-display">Hover over an element for details.</div>
 	<div id="gui-display-host"></div>
 	<div id="start-overlay">
 
@@ -99,8 +75,131 @@
 		document.write(`<script type="module" src="main.js?v=${APP_VERSION}"><\/script>`);
 	</script>
 
-	<div id="description-display"></div>
 	<div id="debug-display"></div>
+
+	<!-- Display Cell Editor -->
+	<style>
+		#cell-editor {
+			display: none;
+			position: fixed;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			background: rgba(0, 0, 0, 0.92);
+			border: 1px solid #48f9ff;
+			border-radius: 4px;
+			color: #48f9ff;
+			font-family: monospace;
+			font-size: 12px;
+			z-index: 600;
+			min-width: 220px;
+		}
+		#cell-editor-header {
+			padding: 8px 12px;
+			border-bottom: 1px solid #48f9ff44;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		#cell-editor-body {
+			padding: 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+		}
+		#cell-editor-body input[type=text] {
+			background: #111;
+			color: #48f9ff;
+			border: 1px solid #48f9ff55;
+			padding: 5px 7px;
+			font-family: "Press Start 2P", monospace;
+			font-size: 10px;
+			width: 100%;
+			box-sizing: border-box;
+			text-transform: uppercase;
+		}
+		#cell-editor-body input[type=text]:focus {
+			outline: none;
+			border-color: #48f9ff;
+		}
+		#cell-editor-close {
+			background: none;
+			border: none;
+			color: #48f9ff;
+			cursor: pointer;
+			font-size: 14px;
+			padding: 0;
+			line-height: 1;
+		}
+	</style>
+
+	<div id="cell-editor">
+		<div id="cell-editor-header">
+			<span>Cell <span id="cell-editor-index"></span></span>
+			<button id="cell-editor-close">&#x2715;</button>
+		</div>
+		<div id="cell-editor-body">
+			<input type="text" id="cell-l1" placeholder="Line 1" maxlength="10" autocomplete="off" spellcheck="false">
+			<input type="text" id="cell-l2" placeholder="Line 2" maxlength="10" autocomplete="off" spellcheck="false">
+			<input type="text" id="cell-l3" placeholder="Line 3" maxlength="10" autocomplete="off" spellcheck="false">
+		</div>
+	</div>
+
+	<script>
+		(function () {
+			let editingDisplay = null;
+			let editingCell = null;
+
+			window._openCellEditor = function (displayName, cellIndex) {
+				editingDisplay = displayName;
+				editingCell = cellIndex;
+
+				const screenKey = window._getCurrentScreenKey ? window._getCurrentScreenKey() : null;
+				const data = screenKey && window._allDisplayScreensData
+					? window._allDisplayScreensData.get(displayName)?.get(screenKey)
+					: null;
+				const cell = (data && data[cellIndex]) || ['', '', ''];
+
+				document.getElementById('cell-editor-index').textContent = cellIndex + 1;
+				document.getElementById('cell-l1').value = cell[0] || '';
+				document.getElementById('cell-l2').value = cell[1] || '';
+				document.getElementById('cell-l3').value = cell[2] || '';
+
+				document.getElementById('cell-editor').style.display = 'block';
+				document.getElementById('cell-l1').focus();
+			};
+
+			function applyEdit() {
+				if (editingDisplay === null || editingCell === null) return;
+				const screenKey = window._getCurrentScreenKey ? window._getCurrentScreenKey() : null;
+				if (!screenKey || !window._allDisplayScreensData) return;
+				const data = window._allDisplayScreensData.get(editingDisplay)?.get(screenKey);
+				if (!data) return;
+
+				data[editingCell] = [
+					document.getElementById('cell-l1').value,
+					document.getElementById('cell-l2').value,
+					document.getElementById('cell-l3').value,
+				];
+
+				if (window._refreshDisplay) window._refreshDisplay();
+			}
+
+			['cell-l1', 'cell-l2', 'cell-l3'].forEach(id => {
+				document.getElementById(id).addEventListener('input', applyEdit);
+			});
+
+			document.getElementById('cell-editor-close').addEventListener('click', () => {
+				document.getElementById('cell-editor').style.display = 'none';
+			});
+
+			document.addEventListener('keydown', e => {
+				if (e.key === 'Escape') {
+					document.getElementById('cell-editor').style.display = 'none';
+				}
+			});
+		})();
+	</script>
 
 </body>
 

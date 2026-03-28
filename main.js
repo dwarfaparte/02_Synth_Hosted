@@ -33,9 +33,7 @@ const INERTIA_DAMPING = 0.97; // <-- ADD: Friction (0.9 = fast stop, 0.99 = long
 const DRAG_SENSITIVITY = 0.005; // <-- ADD: Your existing sensitivity as a constant
 
 // Display and Data Variables
-let descriptionDisplayElement;
 let debugDisplayElement;
-let currentDescriptionText = "";
 let knobDescriptions = new Map();
 let softButtonStates = new Map(); // Key: Object Name (e.g., 'soft1'), Value: State (0, 1, or 2)
 
@@ -233,6 +231,10 @@ function createTextTexture(displayName, textArray, width = 512, height = 128) {
 // e.g., allDisplayScreensData.get('Display01').get('--- MAIN SCREEN ---')
 let allDisplayScreensData = new Map();
 let displayScreensPromise; // To await this in the loader
+let currentScreenKey = 'B_Seq_01';
+window._allDisplayScreensData = allDisplayScreensData;
+window._getCurrentScreenKey = () => currentScreenKey;
+window._refreshDisplay = () => updateDisplays(currentScreenKey);
 
 /**
  * Parses a 6x4 grid of CSV cells into the 8x3 block array needed by createTextTexture.
@@ -390,6 +392,7 @@ async function loadAllDisplayScreens() {
     }
 }
 function updateDisplays(screenKey) {
+    currentScreenKey = screenKey;
     if (!allDisplayScreensData || allDisplayScreensData.size === 0) {
         console.warn('updateDisplays: allDisplayScreensData is not ready.');
         return;
@@ -597,6 +600,7 @@ loader.load(
             softButtonStates.set(buttonName, 1); // Logical state 0 for Red       
         });
         updateDisplays("B_Seq_01");
+        setTimeout(() => updateDisplays("B_Seq_01"), 500);
     },
     undefined,
     function (error) {
@@ -711,10 +715,6 @@ function onDragStart(event) {
     isDragging = true;
     rotationVelocityY = 0;
 
-    // ---  Hide knob GUI on drag start ---
-    if (descriptionDisplayElement) descriptionDisplayElement.style.display = 'none';
-    currentDescriptionText = "";
-
     // Snap back to default flat rotation when click starts
     if (modelToFadeIn && isCameraFocused === false) {
         modelToFadeIn.rotation.x = DEFAULT_ROTATION_X;
@@ -823,13 +823,22 @@ function checkIntersections(isClick = false) {
         isCameraFocused = false;
         isCameraTransitioning = true;
 
-        // Also hide GUI and deselect objects, same as onDragStart
-        if (descriptionDisplayElement) descriptionDisplayElement.style.display = 'none';
-        currentDescriptionText = "";
         selectedObject = null;
         outlinePass.selectedObjects = [];
 
         return; // We're done, un-focusing is the only action needed.
+    }
+
+    // --- DISPLAY CELL EDIT (click while already zoomed in) ---
+    if (isClick && isCameraFocused && hoveredInteractive
+        && (hoveredInteractive.name === 'Display01' || hoveredInteractive.name === 'Display02')) {
+        if (intersects.length > 0 && intersects[0].uv && window._openCellEditor) {
+            const uv = intersects[0].uv;
+            const col = Math.min(Math.floor(uv.x * 4), 3);
+            const row = uv.y > 0.5 ? 0 : 1;
+            window._openCellEditor(hoveredInteractive.name, row * 4 + col);
+        }
+        return;
     }
 
     if (isClick
@@ -940,39 +949,9 @@ function checkIntersections(isClick = false) {
     if (hoveredInteractive && hoveredInteractive !== selectedObject) {
         selectedObject = hoveredInteractive;
         outlinePass.selectedObjects = [selectedObject];
-
-        // Now, decide which GUI to show
-        if (selectedObject.name.includes('Knob')) {
-            // --- It's a Knob ---
-            // REMOVED: hideGuiDisplayCanvas(); // Hide display GUI
-
-            // Show knob description
-            const objectName = selectedObject.name;
-            const description = knobDescriptions.get(objectName);
-
-            if (description && description !== currentDescriptionText) {
-                if (descriptionDisplayElement) {
-                    descriptionDisplayElement.style.display = 'block';
-                    descriptionDisplayElement.innerHTML = description;
-                    currentDescriptionText = description;
-                    descriptionDisplayElement.style.transform = 'scale(1.1)';
-
-                    setTimeout(() => {
-                        if (descriptionDisplayElement) {
-                            descriptionDisplayElement.style.transform = 'scale(1)';
-                        }
-                    }, 150);
-                }
-            }
-        }
     } else if (!hoveredInteractive && selectedObject) {
-        // Mouse is on no object, but an object is still selected
         selectedObject = null;
         outlinePass.selectedObjects = [];
-
-        // Hide all GUIs
-        if (descriptionDisplayElement) descriptionDisplayElement.style.display = 'none';
-        currentDescriptionText = "";
     }
 }
 
@@ -1148,7 +1127,6 @@ function animate() {
 }
 
 // --- Get Display Element from DOM ---
-descriptionDisplayElement = document.getElementById('description-display');
 debugDisplayElement = document.getElementById('debug-display');
 
 // --- Fullscreen & Landscape Lock Logic ---
