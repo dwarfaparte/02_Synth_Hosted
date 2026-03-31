@@ -20,9 +20,8 @@
 			display: block;
 		}
 
-		#export-csv-btn {
+		#export-csv-btn, #load-csv-btn {
 			position: fixed;
-			top: 20px;
 			right: 20px;
 			padding: 8px 14px;
 			background: rgba(0, 0, 0, 0.8);
@@ -34,7 +33,9 @@
 			cursor: pointer;
 			z-index: 500;
 		}
-		#export-csv-btn:hover {
+		#export-csv-btn { top: 20px; }
+		#load-csv-btn   { top: 54px; }
+		#export-csv-btn:hover, #load-csv-btn:hover {
 			background: rgba(72, 249, 255, 0.15);
 		}
 
@@ -69,7 +70,7 @@
 	<div id="fade-overlay"></div>
 	<script>
 
-		const APP_VERSION = "0.01"; // <-- Change this value in one place
+		const APP_VERSION = "0.02"; // <-- Change this value in one place
 	</script>
 
 	<div id="gui-display-host"></div>
@@ -171,6 +172,8 @@
 	</div>
 
 	<button id="export-csv-btn">export.csv</button>
+	<button id="load-csv-btn">load.csv</button>
+	<input type="file" id="load-csv-input" accept=".csv" style="display:none">
 
 	<script>
 		document.getElementById('export-csv-btn').addEventListener('click', async () => {
@@ -199,6 +202,22 @@
 				a.click();
 				URL.revokeObjectURL(url);
 			}
+		});
+	</script>
+
+	<script>
+		document.getElementById('load-csv-btn').addEventListener('click', () => {
+			document.getElementById('load-csv-input').click();
+		});
+		document.getElementById('load-csv-input').addEventListener('change', (e) => {
+			const file = e.target.files[0];
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = (ev) => {
+				if (window._loadDisplaysCSV) window._loadDisplaysCSV(ev.target.result);
+			};
+			reader.readAsText(file);
+			e.target.value = ''; // reset so same file can be reloaded
 		});
 	</script>
 

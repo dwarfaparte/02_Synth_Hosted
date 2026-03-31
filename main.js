@@ -258,6 +258,22 @@ window._allDisplayScreensData = allDisplayScreensData;
 window._getCurrentScreenKey = () => currentScreenKey;
 window._refreshDisplay = () => updateDisplays(currentScreenKey);
 
+window._loadDisplaysCSV = function (csvText) {
+    const parsedData = parseDisplayCSV(csvText);
+    if (parsedData.size === 0) {
+        console.error('_loadDisplaysCSV: No data parsed from CSV.');
+        return;
+    }
+    allDisplayScreensData.set('Display01', new Map());
+    allDisplayScreensData.set('Display02', new Map());
+    for (const [screenKey, data] of parsedData.entries()) {
+        allDisplayScreensData.get('Display01').set(screenKey, data.display1);
+        allDisplayScreensData.get('Display02').set(screenKey, data.display2);
+    }
+    updateDisplays(currentScreenKey);
+    console.log('_loadDisplaysCSV: Loaded', parsedData.size, 'screens.');
+};
+
 window._exportDisplaysCSV = function () {
     const d1Map = allDisplayScreensData.get('Display01');
     if (!d1Map || d1Map.size === 0) return '';
@@ -977,13 +993,8 @@ function checkIntersections(isClick = false) {
         // If undefined (for a button not set at init), default to 1 (Red)
         if (currentState === undefined) currentState = 0;
 
-        // 2. Cycle the state (mode buttons are off/green only, others cycle off→red→green)
-        if (B_Group_Mode.includes(buttonName)) {
-            currentState = currentState === 2 ? 0 : 2;
-        } else {
-            currentState = (currentState + 1);
-            if (currentState > 2) currentState = 1;
-        }
+        // 2. Cycle the state: red → green → both → red
+        currentState = (currentState % 3) + 1;
         softButtonStates.set(buttonName, currentState);
 
         console.log(`${buttonName} clicked. New state: ${currentState}`);
@@ -992,20 +1003,19 @@ function checkIntersections(isClick = false) {
         resetButtonLEDs(buttonName); // Reset other buttons in the group first
 
         switch (currentState) {
-            case 0:
-                setButtonLEDs([buttonName], 0, 0);
-                break;
             case 1:
                 setButtonLEDs([buttonName], 0, 5);
                 break;
             case 2:
                 setButtonLEDs([buttonName], 5, 0);
-                activeMode = buttonName;
+                break;
+            case 3:
+                setButtonLEDs([buttonName], 5, 5);
                 break;
         }
 
-        // Update display using active mode + active page
-        updateDisplays(`${activeMode}_${activeSoftPage}`);
+        // Update display: state number maps to screen suffix (1=_01, 2=_02, 3=_03)
+        updateDisplays(`${buttonName}_0${currentState}`);
         // --- END NEW ---
 
         // Clear hover/selection effect immediately after click
