@@ -590,7 +590,7 @@ document.body.appendChild(renderer.domElement);
 // --- SPLIT-SCREEN LOGIC ---
 let isSplitScreen = false;
 const bottomPanel = document.getElementById('bottom-panel');
-const splitConfig = { ratio: 70 }; // ratio = top panel height as % of viewport
+const splitConfig = { ratio: 65 }; // ratio = top panel height as % of viewport
 window._splitConfig = splitConfig;
 
 // Bottom-view camera & renderer
@@ -827,19 +827,71 @@ function setSplitScreen(enabled) {
             bottomCamConfig.lookY = mid.y;
             bottomCamConfig.lookZ = mid.z;
 
-            // Position camera above the midpoint using same approach normal as top display
+            // Approach normal (same as top display)
             const normal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
             const anchor = scene.getObjectByName(displayZoomConfig.targetName);
             if (anchor) {
                 normal.applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
             }
-            bottomCamConfig.posX = mid.x + normal.x * displayZoomConfig.offsetDist;
-            bottomCamConfig.posY = mid.y + normal.y * displayZoomConfig.offsetDist;
-            bottomCamConfig.posZ = mid.z + normal.z * displayZoomConfig.offsetDist;
 
-            bottomCamConfig.upX = targetCameraUp.x;
-            bottomCamConfig.upY = targetCameraUp.y;
-            bottomCamConfig.upZ = targetCameraUp.z;
+            const displayUp = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
+            if (anchor) {
+                displayUp.applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+            }
+
+            bottomCamConfig.upX = displayUp.x;
+            bottomCamConfig.upY = displayUp.y;
+            bottomCamConfig.upZ = displayUp.z;
+
+            // Dynamic zoom: ensure full meshes of B_Seq and B_Perf are in view
+            const bSeq = scene.getObjectByName('B_Seq');
+            const bPerf = scene.getObjectByName('B_Perf');
+            if (bSeq && bPerf) {
+                // Build view-plane axes from the normal
+                const right = new THREE.Vector3().crossVectors(displayUp, normal).normalize();
+                const up = new THREE.Vector3().crossVectors(normal, right).normalize();
+
+                // Collect all bounding box corners from the reference meshes
+                const refObjects = [bSamp, bSnth, bSeq, bPerf];
+                let minR = Infinity, maxR = -Infinity, minU = Infinity, maxU = -Infinity;
+                for (const obj of refObjects) {
+                    const bbox = new THREE.Box3().setFromObject(obj);
+                    // Check all 8 corners of the bounding box
+                    const corners = [
+                        new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
+                        new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.max.z),
+                        new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.min.z),
+                        new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.max.z),
+                        new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.min.z),
+                        new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.max.z),
+                        new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.min.z),
+                        new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.max.z),
+                    ];
+                    for (const c of corners) {
+                        const rel = c.sub(mid);
+                        const r = rel.dot(right);
+                        const u = rel.dot(up);
+                        minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+                        minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+                    }
+                }
+                const spanWidth = maxR - minR;
+                const spanHeight = maxU - minU;
+
+                // Compute optimal distance for bottom panel aspect ratio
+                const bottomH = window.innerHeight - getTopHeight();
+                const bottomAspect = window.innerWidth / bottomH;
+                const fovRad = THREE.MathUtils.degToRad(bottomCamera.fov);
+                const padding = 1.40;
+
+                const distForH = (spanHeight / 2) / Math.tan(fovRad / 2) * padding;
+                const distForW = (spanWidth / 2) / (Math.tan(fovRad / 2) * bottomAspect) * padding;
+                const optimalDist = Math.max(distForH, distForW);
+
+                bottomCamConfig.posX = mid.x + normal.x * optimalDist;
+                bottomCamConfig.posY = mid.y + normal.y * optimalDist;
+                bottomCamConfig.posZ = mid.z + normal.z * optimalDist;
+            }
         }
 
         modelToFadeIn.rotation.y = savedRotY;
@@ -1088,7 +1140,6 @@ function checkIntersections(isClick = false) {
 
         const displayNormal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
         displayNormal.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
-        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, displayZoomConfig.offsetDist);
 
         const lookAtOffset = new THREE.Vector3(displayZoomConfig.lookAtOffsetX, displayZoomConfig.lookAtOffsetY, displayZoomConfig.lookAtOffsetZ);
         targetLookAt.copy(displayWorldPos).add(lookAtOffset);
@@ -1096,6 +1147,30 @@ function checkIntersections(isClick = false) {
         const displayUp = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
         displayUp.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
         targetCameraUp.copy(displayUp);
+
+        // Compute optimal distance to fill camera with the display
+        const bbox = new THREE.Box3().setFromObject(targetObject);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+
+        // Project size onto the plane perpendicular to the camera approach normal
+        // Use the two axes orthogonal to the normal to get width/height in view
+        const right = new THREE.Vector3().crossVectors(displayUp, displayNormal).normalize();
+        const up = new THREE.Vector3().crossVectors(displayNormal, right).normalize();
+        const displayWidth = Math.abs(size.dot(right));
+        const displayHeight = Math.abs(size.dot(up));
+
+        // Split screen changes the aspect ratio, so compute it for the top panel
+        const topH = Math.floor(window.innerHeight * splitConfig.ratio / 100);
+        const aspect = window.innerWidth / topH;
+        const fovRad = THREE.MathUtils.degToRad(camera.fov);
+        const padding = 1.17; // back off to ~90% fill
+
+        const distForHeight = (displayHeight / 2) / Math.tan(fovRad / 2) * padding;
+        const distForWidth = (displayWidth / 2) / (Math.tan(fovRad / 2) * aspect) * padding;
+        const optimalDist = Math.max(distForHeight, distForWidth);
+
+        targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, optimalDist);
 
         // 4. Restore the model's rotation to its original position
         modelToFadeIn.rotation.y = originalModelRotationY;
