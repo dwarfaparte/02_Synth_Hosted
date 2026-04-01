@@ -67,15 +67,14 @@
 }
 
 #bottom-panel.visible {
-    display: block;
+    display: flex;
 }
 
-#bottom-panel-content {
-    width: 100%;
+#bottom-panel-left,
+#bottom-panel-right {
+    width: 50%;
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    overflow: hidden;
 }
 
 #debug-display {

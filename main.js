@@ -593,8 +593,8 @@ const bottomPanel = document.getElementById('bottom-panel');
 const splitConfig = { ratio: 65 }; // ratio = top panel height as % of viewport
 window._splitConfig = splitConfig;
 
-// Bottom-view camera & renderer
-const bottomCamera = new THREE.PerspectiveCamera(20, window.innerWidth / (window.innerHeight * 0.3), 0.1, 1000);
+// Bottom-left camera & renderer
+const bottomCamera = new THREE.PerspectiveCamera(20, 1, 0.1, 1000);
 const bottomRenderer = new THREE.WebGLRenderer({ antialias: true });
 bottomRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 const bottomCamConfig = {
@@ -604,14 +604,33 @@ const bottomCamConfig = {
 };
 window._bottomCamConfig = bottomCamConfig;
 
-// Append bottom renderer canvas to the bottom panel
+// Bottom-right camera & renderer
+const bottomRightCamera = new THREE.PerspectiveCamera(20, 1, 0.1, 1000);
+const bottomRightRenderer = new THREE.WebGLRenderer({ antialias: true });
+bottomRightRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+const bottomRightCamConfig = {
+    posX: 0, posY: 15, posZ: 0,
+    lookX: 0, lookY: 0, lookZ: 0,
+    upX: 0, upY: 0, upZ: -1
+};
+window._bottomRightCamConfig = bottomRightCamConfig;
+
+// Append canvases to bottom panel halves
 if (bottomPanel) {
-    const contentDiv = document.getElementById('bottom-panel-content');
-    if (contentDiv) contentDiv.innerHTML = '';
-    (contentDiv || bottomPanel).appendChild(bottomRenderer.domElement);
-    bottomRenderer.domElement.style.width = '100%';
-    bottomRenderer.domElement.style.height = '100%';
-    bottomRenderer.domElement.style.display = 'block';
+    const leftDiv = document.getElementById('bottom-panel-left');
+    const rightDiv = document.getElementById('bottom-panel-right');
+    if (leftDiv) {
+        leftDiv.appendChild(bottomRenderer.domElement);
+        bottomRenderer.domElement.style.width = '100%';
+        bottomRenderer.domElement.style.height = '100%';
+        bottomRenderer.domElement.style.display = 'block';
+    }
+    if (rightDiv) {
+        rightDiv.appendChild(bottomRightRenderer.domElement);
+        bottomRightRenderer.domElement.style.width = '100%';
+        bottomRightRenderer.domElement.style.height = '100%';
+        bottomRightRenderer.domElement.style.display = 'block';
+    }
 }
 
 // --- BACKGROUND TEXTURE LOADING ---
@@ -878,20 +897,93 @@ function setSplitScreen(enabled) {
                 const spanWidth = maxR - minR;
                 const spanHeight = maxU - minU;
 
-                // Compute optimal distance for bottom panel aspect ratio
+                // Compute optimal distance for bottom-left panel (half width)
                 const bottomH = window.innerHeight - getTopHeight();
-                const bottomAspect = window.innerWidth / bottomH;
+                const halfW = Math.floor(window.innerWidth / 2);
+                const bottomLeftAspect = halfW / bottomH;
                 const fovRad = THREE.MathUtils.degToRad(bottomCamera.fov);
-                const padding = 1.40;
+                const padding = 1.50;
 
                 const distForH = (spanHeight / 2) / Math.tan(fovRad / 2) * padding;
-                const distForW = (spanWidth / 2) / (Math.tan(fovRad / 2) * bottomAspect) * padding;
+                const distForW = (spanWidth / 2) / (Math.tan(fovRad / 2) * bottomLeftAspect) * padding;
                 const optimalDist = Math.max(distForH, distForW);
 
                 bottomCamConfig.posX = mid.x + normal.x * optimalDist;
                 bottomCamConfig.posY = mid.y + normal.y * optimalDist;
                 bottomCamConfig.posZ = mid.z + normal.z * optimalDist;
             }
+        }
+
+        // --- Bottom-right camera: focused between B_AB and B_Play ---
+        const bAB = scene.getObjectByName('B_AB');
+        const bPlay = scene.getObjectByName('B_Play');
+        if (bAB && bPlay) {
+            const posAB = new THREE.Vector3();
+            const posPlay = new THREE.Vector3();
+            bAB.getWorldPosition(posAB);
+            bPlay.getWorldPosition(posPlay);
+            const midRight = posAB.clone().add(posPlay).multiplyScalar(0.5);
+
+            bottomRightCamConfig.lookX = midRight.x;
+            bottomRightCamConfig.lookY = midRight.y;
+            bottomRightCamConfig.lookZ = midRight.z;
+
+            const normal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
+            const displayUpR = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
+            const anchor = scene.getObjectByName(displayZoomConfig.targetName);
+            if (anchor) {
+                normal.applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+                displayUpR.applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+            }
+
+            bottomRightCamConfig.upX = displayUpR.x;
+            bottomRightCamConfig.upY = displayUpR.y;
+            bottomRightCamConfig.upZ = displayUpR.z;
+
+            // Dynamic zoom to fit both B_AB and B_Play meshes
+            const right = new THREE.Vector3().crossVectors(displayUpR, normal).normalize();
+            const up = new THREE.Vector3().crossVectors(normal, right).normalize();
+
+            const refObjects = [bAB, bPlay];
+            let minR = Infinity, maxR = -Infinity, minU = Infinity, maxU = -Infinity;
+            for (const obj of refObjects) {
+                const bbox = new THREE.Box3().setFromObject(obj);
+                const corners = [
+                    new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
+                    new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.max.z),
+                    new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.min.z),
+                    new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.max.z),
+                    new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.min.z),
+                    new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.max.z),
+                    new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.min.z),
+                    new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.max.z),
+                ];
+                for (const c of corners) {
+                    const rel = c.sub(midRight);
+                    const r = rel.dot(right);
+                    const u = rel.dot(up);
+                    minR = Math.min(minR, r); maxR = Math.max(maxR, r);
+                    minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+                }
+            }
+            const spanW = maxR - minR;
+            const spanH = maxU - minU;
+
+            const bottomH = window.innerHeight - getTopHeight();
+            const halfW = Math.floor(window.innerWidth / 2);
+            const rightAspect = halfW / bottomH;
+            const fovRad = THREE.MathUtils.degToRad(bottomRightCamera.fov);
+            const padding = 1.50;
+
+            const dH = (spanH / 2) / Math.tan(fovRad / 2) * padding;
+            const dW = (spanW / 2) / (Math.tan(fovRad / 2) * rightAspect) * padding;
+            const optDist = Math.max(dH, dW);
+
+            bottomRightCamConfig.posX = midRight.x + normal.x * optDist;
+            bottomRightCamConfig.posY = midRight.y + normal.y * optDist;
+            bottomRightCamConfig.posZ = midRight.z + normal.z * optDist;
+        } else {
+            console.warn('Bottom-right camera: could not find B_AB and/or B_Play in scene');
         }
 
         modelToFadeIn.rotation.y = savedRotY;
@@ -934,9 +1026,14 @@ function applySplitLayout() {
             bottomPanel.style.top = topH + 'px';
             bottomPanel.style.bottom = 'auto';
 
-            bottomRenderer.setSize(w, bottomH);
-            bottomCamera.aspect = w / bottomH;
+            const halfW = Math.floor(w / 2);
+            bottomRenderer.setSize(halfW, bottomH);
+            bottomCamera.aspect = halfW / bottomH;
             bottomCamera.updateProjectionMatrix();
+
+            bottomRightRenderer.setSize(halfW, bottomH);
+            bottomRightCamera.aspect = halfW / bottomH;
+            bottomRightCamera.updateProjectionMatrix();
         }
     }
 
@@ -972,6 +1069,85 @@ function onMouseClick(event) {
 }
 
 renderer.domElement.addEventListener('click', onMouseClick, false);
+
+// --- Bottom panel click handlers ---
+function onBottomPanelClick(event, cam) {
+    if (!modelToFadeIn) return;
+
+    const canvas = event.target;
+    const rect = canvas.getBoundingClientRect();
+    const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const my = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    const bottomMouse = new THREE.Vector2(mx, my);
+    const bottomRaycaster = new THREE.Raycaster();
+    bottomRaycaster.setFromCamera(bottomMouse, cam);
+    const intersects = bottomRaycaster.intersectObject(modelToFadeIn, true);
+
+    if (intersects.length === 0) return;
+
+    // Walk up to find an interactive object
+    let hit = null;
+    let objectToCheck = intersects[0].object;
+    while (objectToCheck) {
+        if (objectToCheck.name) {
+            if (objectToCheck.name.includes('Knob')
+                || objectToCheck.name === 'Display01'
+                || objectToCheck.name === 'Display02'
+                || objectToCheck.name.includes('B_')
+                || objectToCheck.name.startsWith('Bb_')) {
+                hit = objectToCheck;
+                break;
+            }
+        }
+        objectToCheck = objectToCheck.parent;
+    }
+    if (!hit) return;
+
+    // Display cell edit
+    if (hit.name === 'Display01' || hit.name === 'Display02') {
+        if (intersects[0].uv && window._openCellEditor) {
+            const uv = intersects[0].uv;
+            const col = Math.min(Math.floor(uv.x * 4), 3);
+            const row = uv.y > 0.5 ? 1 : 0;
+            window._openCellEditor(hit.name, row * 4 + col);
+        }
+        return;
+    }
+
+    // Bb_Soft page select
+    if (hit.name.startsWith('Bb_Soft_')) {
+        const pageNum = hit.name.split('_').pop();
+        activeSoftPage = pageNum;
+        updateDisplays(`${activeMode}_${activeSoftPage}`);
+        setBbSoftActive(pageNum);
+        return;
+    }
+
+    // B_ button click (mode buttons, soft buttons, etc.)
+    if (hit.name.includes('B_')) {
+        const buttonName = hit.name;
+
+        let currentState = softButtonStates.get(buttonName);
+        if (currentState === undefined) currentState = 0;
+
+        currentState = (currentState % 3) + 1;
+        softButtonStates.set(buttonName, currentState);
+
+        resetButtonLEDs(buttonName);
+
+        switch (currentState) {
+            case 1: setButtonLEDs([buttonName], 0, 5); break;
+            case 2: setButtonLEDs([buttonName], 5, 0); break;
+            case 3: setButtonLEDs([buttonName], 5, 5); break;
+        }
+
+        updateDisplays(`${buttonName}_0${currentState}`);
+    }
+}
+
+bottomRenderer.domElement.addEventListener('click', (e) => onBottomPanelClick(e, bottomCamera), false);
+bottomRightRenderer.domElement.addEventListener('click', (e) => onBottomPanelClick(e, bottomRightCamera), false);
 
 // Mouse Functions
 // --- Model Rotation / Drag Logic ---
@@ -1440,12 +1616,17 @@ function animate() {
     // Render via the EffectComposer
     composer.render();
 
-    // Render bottom view when split screen is active
+    // Render bottom views when split screen is active
     if (isSplitScreen) {
         bottomCamera.position.set(bottomCamConfig.posX, bottomCamConfig.posY, bottomCamConfig.posZ);
         bottomCamera.up.set(bottomCamConfig.upX, bottomCamConfig.upY, bottomCamConfig.upZ);
         bottomCamera.lookAt(bottomCamConfig.lookX, bottomCamConfig.lookY, bottomCamConfig.lookZ);
         bottomRenderer.render(scene, bottomCamera);
+
+        bottomRightCamera.position.set(bottomRightCamConfig.posX, bottomRightCamConfig.posY, bottomRightCamConfig.posZ);
+        bottomRightCamera.up.set(bottomRightCamConfig.upX, bottomRightCamConfig.upY, bottomRightCamConfig.upZ);
+        bottomRightCamera.lookAt(bottomRightCamConfig.lookX, bottomRightCamConfig.lookY, bottomRightCamConfig.lookZ);
+        bottomRightRenderer.render(scene, bottomRightCamera);
     }
 }
 
