@@ -587,6 +587,33 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 document.body.appendChild(renderer.domElement);
 
+// --- SPLIT-SCREEN LOGIC ---
+let isSplitScreen = false;
+const bottomPanel = document.getElementById('bottom-panel');
+const splitConfig = { ratio: 70 }; // ratio = top panel height as % of viewport
+window._splitConfig = splitConfig;
+
+// Bottom-view camera & renderer
+const bottomCamera = new THREE.PerspectiveCamera(20, window.innerWidth / (window.innerHeight * 0.3), 0.1, 1000);
+const bottomRenderer = new THREE.WebGLRenderer({ antialias: true });
+bottomRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+const bottomCamConfig = {
+    posX: 0, posY: 15, posZ: 0,
+    lookX: 0, lookY: 0, lookZ: 0,
+    upX: 0, upY: 0, upZ: -1
+};
+window._bottomCamConfig = bottomCamConfig;
+
+// Append bottom renderer canvas to the bottom panel
+if (bottomPanel) {
+    const contentDiv = document.getElementById('bottom-panel-content');
+    if (contentDiv) contentDiv.innerHTML = '';
+    (contentDiv || bottomPanel).appendChild(bottomRenderer.domElement);
+    bottomRenderer.domElement.style.width = '100%';
+    bottomRenderer.domElement.style.height = '100%';
+    bottomRenderer.domElement.style.display = 'block';
+}
+
 // --- BACKGROUND TEXTURE LOADING ---
 const textureLoader = new THREE.TextureLoader();
 const backgroundPath = 'Synth Model/skybox_bright.jpg';
@@ -771,10 +798,111 @@ grainPass.uniforms['amount'].value = 0.08; // ADJUST THIS: Lower (0.02) = cleane
 grainPass.renderToScreen = true;
 composer.addPass(grainPass);
 
+// --- SPLIT-SCREEN FUNCTION ---
+function getTopHeight() {
+    return Math.floor(window.innerHeight * splitConfig.ratio / 100);
+}
+
+function setSplitScreen(enabled) {
+    if (isSplitScreen === enabled) return;
+    isSplitScreen = enabled;
+
+    if (enabled && modelToFadeIn) {
+        // Snap model to target rotation for accurate world positions
+        const savedRotY = modelToFadeIn.rotation.y;
+        modelToFadeIn.rotation.y = targetModelRotationY;
+        modelToFadeIn.updateMatrixWorld(true);
+
+        // Compute midpoint between B_Samp and B_Snth as lookAt target
+        const bSamp = scene.getObjectByName('B_Samp');
+        const bSnth = scene.getObjectByName('B_Snth');
+        if (bSamp && bSnth) {
+            const posSamp = new THREE.Vector3();
+            const posSnth = new THREE.Vector3();
+            bSamp.getWorldPosition(posSamp);
+            bSnth.getWorldPosition(posSnth);
+            const mid = posSamp.clone().add(posSnth).multiplyScalar(0.5);
+
+            bottomCamConfig.lookX = mid.x;
+            bottomCamConfig.lookY = mid.y;
+            bottomCamConfig.lookZ = mid.z;
+
+            // Position camera above the midpoint using same approach normal as top display
+            const normal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
+            const anchor = scene.getObjectByName(displayZoomConfig.targetName);
+            if (anchor) {
+                normal.applyQuaternion(anchor.getWorldQuaternion(new THREE.Quaternion()));
+            }
+            bottomCamConfig.posX = mid.x + normal.x * displayZoomConfig.offsetDist;
+            bottomCamConfig.posY = mid.y + normal.y * displayZoomConfig.offsetDist;
+            bottomCamConfig.posZ = mid.z + normal.z * displayZoomConfig.offsetDist;
+
+            bottomCamConfig.upX = targetCameraUp.x;
+            bottomCamConfig.upY = targetCameraUp.y;
+            bottomCamConfig.upZ = targetCameraUp.z;
+        }
+
+        modelToFadeIn.rotation.y = savedRotY;
+        syncBottomCameraSliders();
+    }
+
+    applySplitLayout();
+}
+
+function syncBottomCameraSliders() {
+    const ids = [
+        ['bce-px', 'posX'], ['bce-py', 'posY'], ['bce-pz', 'posZ'],
+        ['bce-lx', 'lookX'], ['bce-ly', 'lookY'], ['bce-lz', 'lookZ'],
+        ['bce-ux', 'upX'], ['bce-uy', 'upY'], ['bce-uz', 'upZ'],
+    ];
+    ids.forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        const valEl = document.getElementById(id + '-v');
+        if (el) el.value = bottomCamConfig[key];
+        if (valEl) valEl.textContent = parseFloat(bottomCamConfig[key]).toFixed(1);
+    });
+}
+window._syncBottomCameraSliders = syncBottomCameraSliders;
+
+function applySplitLayout() {
+    const w = window.innerWidth;
+    const topH = isSplitScreen ? getTopHeight() : window.innerHeight;
+    const bottomH = window.innerHeight - topH;
+
+    renderer.setSize(w, topH);
+    composer.setSize(w, topH);
+    camera.aspect = w / topH;
+    camera.updateProjectionMatrix();
+    outlinePass.resolution.set(w, topH);
+
+    if (bottomPanel) {
+        bottomPanel.classList.toggle('visible', isSplitScreen);
+        if (isSplitScreen) {
+            bottomPanel.style.height = bottomH + 'px';
+            bottomPanel.style.top = topH + 'px';
+            bottomPanel.style.bottom = 'auto';
+
+            bottomRenderer.setSize(w, bottomH);
+            bottomCamera.aspect = w / bottomH;
+            bottomCamera.updateProjectionMatrix();
+        }
+    }
+
+    const splitEditor = document.getElementById('split-editor');
+    if (splitEditor) {
+        splitEditor.classList.toggle('visible', isSplitScreen);
+    }
+}
+window._applySplitLayout = applySplitLayout;
+
 // --- MODIFIED: Mouse Move Handler for Raycasting ---
+function getCanvasHeight() {
+    return isSplitScreen ? getTopHeight() : window.innerHeight;
+}
+
 function onMouseMove(event) {
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    mouse.y = -(event.clientY / getCanvasHeight()) * 2 + 1;
 }
 window.addEventListener('mousemove', onMouseMove, false);
 
@@ -785,7 +913,7 @@ function onMouseClick(event) {
 
     // Set mouse position for raycaster
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    mouse.y = -(event.clientY / getCanvasHeight()) * 2 + 1;
 
     // Check intersections immediately on click
     checkIntersections(true); // <-- Pass 'true' to indicate a click action
@@ -906,6 +1034,7 @@ function checkIntersections(isClick = false) {
         // ...then un-focus the camera.
         isCameraFocused = false;
         isCameraTransitioning = true;
+        setSplitScreen(false);
 
         selectedObject = null;
         outlinePass.selectedObjects = [];
@@ -970,6 +1099,9 @@ function checkIntersections(isClick = false) {
 
         // 4. Restore the model's rotation to its original position
         modelToFadeIn.rotation.y = originalModelRotationY;
+
+        // Now that targets are computed, init bottom camera and split screen
+        setSplitScreen(true);
         return; // Stop processing, we've handled the display click
     }
 
@@ -1232,6 +1364,14 @@ function animate() {
 
     // Render via the EffectComposer
     composer.render();
+
+    // Render bottom view when split screen is active
+    if (isSplitScreen) {
+        bottomCamera.position.set(bottomCamConfig.posX, bottomCamConfig.posY, bottomCamConfig.posZ);
+        bottomCamera.up.set(bottomCamConfig.upX, bottomCamConfig.upY, bottomCamConfig.upZ);
+        bottomCamera.lookAt(bottomCamConfig.lookX, bottomCamConfig.lookY, bottomCamConfig.lookZ);
+        bottomRenderer.render(scene, bottomCamera);
+    }
 }
 
 // --- Get Display Element from DOM ---
@@ -1273,9 +1413,11 @@ animate();
 
 // 8. Handle Window Resizing
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const w = window.innerWidth;
+    const h = isSplitScreen ? getTopHeight() : window.innerHeight;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    composer.setSize(window.innerWidth, window.innerHeight);
-    outlinePass.resolution.set(window.innerWidth, window.innerHeight);
+    renderer.setSize(w, h);
+    composer.setSize(w, h);
+    outlinePass.resolution.set(w, h);
 });

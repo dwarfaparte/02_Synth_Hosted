@@ -96,6 +96,111 @@
 
 	<div id="debug-display"></div>
 
+	<!-- Bottom Panel (split-screen when zoomed into display) -->
+	<div id="bottom-panel">
+		<div id="bottom-panel-content">
+			<span style="color:#48f9ff88; font-family:monospace; font-size:13px;">Bottom panel — ready for content</span>
+		</div>
+	</div>
+
+	<!-- Bottom Camera Editor -->
+	<style>
+		#split-editor {
+			position: fixed;
+			bottom: 20px;
+			right: 20px;
+			background: rgba(0,0,0,0.85);
+			border: 1px solid #48f9ff;
+			border-radius: 4px;
+			color: #48f9ff;
+			font-family: monospace;
+			font-size: 11px;
+			z-index: 500;
+			min-width: 280px;
+			display: none;
+		}
+		#split-editor.visible { display: block; }
+		#split-editor-header {
+			padding: 8px 12px;
+			cursor: pointer;
+			user-select: none;
+			border-bottom: 1px solid #48f9ff44;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		#split-editor-body { padding: 10px 12px; display: none; }
+		#split-editor-body.open { display: block; }
+		.bce-section {
+			margin-bottom: 6px;
+			color: #48f9ff88;
+			text-transform: uppercase;
+			font-size: 10px;
+			letter-spacing: 1px;
+		}
+		.bce-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			margin-bottom: 6px;
+		}
+		.bce-row label { width: 30px; }
+		.bce-row input[type=range] { flex: 1; accent-color: #48f9ff; }
+		.bce-row .val { width: 48px; text-align: right; }
+	</style>
+
+	<div id="split-editor">
+		<div id="split-editor-header">
+			<span>Bottom Camera</span>
+			<span id="split-editor-toggle">▲</span>
+		</div>
+		<div id="split-editor-body">
+			<div class="bce-section">Position</div>
+			<div class="bce-row"><label>X</label><input type="range" id="bce-px" min="-30" max="30" step="0.1" value="0"><span class="val" id="bce-px-v">0.0</span></div>
+			<div class="bce-row"><label>Y</label><input type="range" id="bce-py" min="-30" max="30" step="0.1" value="15"><span class="val" id="bce-py-v">15.0</span></div>
+			<div class="bce-row"><label>Z</label><input type="range" id="bce-pz" min="-30" max="30" step="0.1" value="0"><span class="val" id="bce-pz-v">0.0</span></div>
+
+			<div class="bce-section">Look At</div>
+			<div class="bce-row"><label>X</label><input type="range" id="bce-lx" min="-20" max="20" step="0.1" value="0"><span class="val" id="bce-lx-v">0.0</span></div>
+			<div class="bce-row"><label>Y</label><input type="range" id="bce-ly" min="-20" max="20" step="0.1" value="0"><span class="val" id="bce-ly-v">0.0</span></div>
+			<div class="bce-row"><label>Z</label><input type="range" id="bce-lz" min="-20" max="20" step="0.1" value="0"><span class="val" id="bce-lz-v">0.0</span></div>
+
+			<div class="bce-section">Up Vector</div>
+			<div class="bce-row"><label>X</label><input type="range" id="bce-ux" min="-1" max="1" step="0.05" value="0"><span class="val" id="bce-ux-v">0.0</span></div>
+			<div class="bce-row"><label>Y</label><input type="range" id="bce-uy" min="-1" max="1" step="0.05" value="0"><span class="val" id="bce-uy-v">0.0</span></div>
+			<div class="bce-row"><label>Z</label><input type="range" id="bce-uz" min="-1" max="1" step="0.05" value="-1"><span class="val" id="bce-uz-v">-1.0</span></div>
+		</div>
+	</div>
+
+	<script>
+		(function () {
+			const header = document.getElementById('split-editor-header');
+			const body = document.getElementById('split-editor-body');
+			const toggle = document.getElementById('split-editor-toggle');
+
+			header.addEventListener('click', () => {
+				const open = body.classList.toggle('open');
+				toggle.textContent = open ? '▼' : '▲';
+			});
+
+			const sliders = [
+				['bce-px','posX'], ['bce-py','posY'], ['bce-pz','posZ'],
+				['bce-lx','lookX'], ['bce-ly','lookY'], ['bce-lz','lookZ'],
+				['bce-ux','upX'], ['bce-uy','upY'], ['bce-uz','upZ'],
+			];
+
+			sliders.forEach(([id, key]) => {
+				document.getElementById(id).addEventListener('input', () => {
+					const v = parseFloat(document.getElementById(id).value);
+					document.getElementById(id + '-v').textContent = v.toFixed(1);
+					if (window._bottomCamConfig) {
+						window._bottomCamConfig[key] = v;
+					}
+				});
+			});
+		})();
+	</script>
+
 	<!-- Display Cell Editor -->
 	<style>
 		#cell-editor {
