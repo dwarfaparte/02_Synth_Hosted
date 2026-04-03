@@ -35,6 +35,28 @@ let debugDisplayElement;
 let knobDescriptions = new Map();
 let softButtonStates = new Map(); // Key: Object Name (e.g., 'soft1'), Value: State (0, 1, or 2)
 
+// Button click sound (Web Audio API with lowpass filter)
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const clickFilter = audioCtx.createBiquadFilter();
+clickFilter.type = 'lowpass';
+clickFilter.frequency.value = 1000;
+clickFilter.connect(audioCtx.destination);
+
+let clickBuffer = null;
+fetch('Sounds/click.wav')
+    .then(r => r.arrayBuffer())
+    .then(buf => audioCtx.decodeAudioData(buf))
+    .then(decoded => { clickBuffer = decoded; });
+
+function playClickSound() {
+    if (!clickBuffer) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const src = audioCtx.createBufferSource();
+    src.buffer = clickBuffer;
+    src.connect(clickFilter);
+    src.start();
+}
+
 // Button press animation
 const buttonAnimations = new Map(); // Key: object name, Value: { obj, originY, time }
 const BUTTON_PRESS_DEPTH = 0.03;
@@ -42,6 +64,7 @@ const BUTTON_PRESS_DURATION = 0.15; // seconds for down + up
 
 function animateButtonPress(obj) {
     if (!obj || buttonAnimations.has(obj.name)) return;
+    playClickSound();
     buttonAnimations.set(obj.name, {
         obj,
         originY: obj.position.y,
@@ -1023,26 +1046,12 @@ function setSplitScreen(enabled) {
         }
 
         modelToFadeIn.rotation.y = savedRotY;
-        syncBottomCameraSliders();
+
     }
 
     applySplitLayout();
 }
 
-function syncBottomCameraSliders() {
-    const ids = [
-        ['bce-px', 'posX'], ['bce-py', 'posY'], ['bce-pz', 'posZ'],
-        ['bce-lx', 'lookX'], ['bce-ly', 'lookY'], ['bce-lz', 'lookZ'],
-        ['bce-ux', 'upX'], ['bce-uy', 'upY'], ['bce-uz', 'upZ'],
-    ];
-    ids.forEach(([id, key]) => {
-        const el = document.getElementById(id);
-        const valEl = document.getElementById(id + '-v');
-        if (el) el.value = bottomCamConfig[key];
-        if (valEl) valEl.textContent = parseFloat(bottomCamConfig[key]).toFixed(1);
-    });
-}
-window._syncBottomCameraSliders = syncBottomCameraSliders;
 
 function applySplitLayout() {
     const w = window.innerWidth;
@@ -1073,10 +1082,6 @@ function applySplitLayout() {
         }
     }
 
-    const splitEditor = document.getElementById('split-editor');
-    if (splitEditor) {
-        splitEditor.classList.toggle('visible', isSplitScreen);
-    }
 }
 window._applySplitLayout = applySplitLayout;
 
@@ -1463,35 +1468,6 @@ function checkIntersections(isClick = false) {
         outlinePass.selectedObjects = [];
     }
 }
-
-window._retriggerDisplayZoom = function () {
-    if (!modelToFadeIn) return;
-    isCameraFocused = true;
-    isCameraTransitioning = true;
-    rotationVelocityY = 0;
-    targetModelRotationY = 0;
-    const savedRotY = modelToFadeIn.rotation.y;
-    modelToFadeIn.rotation.y = 0;
-    modelToFadeIn.updateMatrixWorld(true);
-
-    const targetObject = scene.getObjectByName(displayZoomConfig.targetName);
-    if (!targetObject) {
-        console.error(`Retrigger: Could not find '${displayZoomConfig.targetName}'`);
-        modelToFadeIn.rotation.y = savedRotY;
-        return;
-    }
-    const displayWorldPos = new THREE.Vector3();
-    targetObject.getWorldPosition(displayWorldPos);
-    const displayNormal = new THREE.Vector3(displayZoomConfig.normalX, displayZoomConfig.normalY, displayZoomConfig.normalZ);
-    displayNormal.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
-    targetCameraPosition.copy(displayWorldPos).addScaledVector(displayNormal, displayZoomConfig.offsetDist);
-    const lookAtOffset = new THREE.Vector3(displayZoomConfig.lookAtOffsetX, displayZoomConfig.lookAtOffsetY, displayZoomConfig.lookAtOffsetZ);
-    targetLookAt.copy(displayWorldPos).add(lookAtOffset);
-    const displayUp = new THREE.Vector3(displayZoomConfig.upX, displayZoomConfig.upY, displayZoomConfig.upZ);
-    displayUp.applyQuaternion(targetObject.getWorldQuaternion(new THREE.Quaternion()));
-    targetCameraUp.copy(displayUp);
-    modelToFadeIn.rotation.y = savedRotY;
-};
 
 // Main Loop
 function animate() {
