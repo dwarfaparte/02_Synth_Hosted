@@ -35,6 +35,34 @@ let debugDisplayElement;
 let knobDescriptions = new Map();
 let softButtonStates = new Map(); // Key: Object Name (e.g., 'soft1'), Value: State (0, 1, or 2)
 
+// Button press animation
+const buttonAnimations = new Map(); // Key: object name, Value: { obj, originY, time }
+const BUTTON_PRESS_DEPTH = 0.03;
+const BUTTON_PRESS_DURATION = 0.15; // seconds for down + up
+
+function animateButtonPress(obj) {
+    if (!obj || buttonAnimations.has(obj.name)) return;
+    buttonAnimations.set(obj.name, {
+        obj,
+        originY: obj.position.y,
+        startTime: performance.now()
+    });
+}
+
+function updateButtonAnimations() {
+    const now = performance.now();
+    for (const [name, anim] of buttonAnimations) {
+        const elapsed = (now - anim.startTime) / 1000;
+        const t = elapsed / BUTTON_PRESS_DURATION;
+        if (t >= 1) {
+            anim.obj.position.y = anim.originY;
+            buttonAnimations.delete(name);
+        } else {
+            const offset = Math.sin(t * Math.PI) * BUTTON_PRESS_DEPTH;
+            anim.obj.position.y = anim.originY - offset;
+        }
+    }
+}
 
 // LED Functions
 function resetButtonLEDs(targetButton) {
@@ -54,6 +82,25 @@ function resetButtonLEDs(targetButton) {
     }
 }
 
+
+// Highlights the active Bb_Trk button with a blue glow, dims the other.
+function setBbTrkActive(activeName) {
+    const buttons = ['Bb_Trk1', 'Bb_Trk2'];
+    buttons.forEach(name => {
+        const obj = scene.getObjectByName(name);
+        if (!obj) return;
+        const isActive = name === activeName;
+        obj.traverse(child => {
+            if (!child.isMesh) return;
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(mat => {
+                mat.emissive = new THREE.Color(0x48f9ff);
+                mat.emissiveIntensity = isActive ? 1.2 : 0;
+                mat.needsUpdate = true;
+            });
+        });
+    });
+}
 
 // Sets the LED brightness for a list of soft buttons by name.
 // @param {string[]} buttonNames - An array of button names (e.g., ['Soft01', 'Soft02']).
@@ -597,21 +644,21 @@ const bottomRightCamConfig = {
 };
 window._bottomRightCamConfig = bottomRightCamConfig;
 
-// Append canvases to bottom panel halves
+// Append canvases to bottom panel halves (swapped: right camera on left, left camera on right)
 if (bottomPanel) {
     const leftDiv = document.getElementById('bottom-panel-left');
     const rightDiv = document.getElementById('bottom-panel-right');
     if (leftDiv) {
-        leftDiv.appendChild(bottomRenderer.domElement);
-        bottomRenderer.domElement.style.width = '100%';
-        bottomRenderer.domElement.style.height = '100%';
-        bottomRenderer.domElement.style.display = 'block';
-    }
-    if (rightDiv) {
-        rightDiv.appendChild(bottomRightRenderer.domElement);
+        leftDiv.appendChild(bottomRightRenderer.domElement);
         bottomRightRenderer.domElement.style.width = '100%';
         bottomRightRenderer.domElement.style.height = '100%';
         bottomRightRenderer.domElement.style.display = 'block';
+    }
+    if (rightDiv) {
+        rightDiv.appendChild(bottomRenderer.domElement);
+        bottomRenderer.domElement.style.width = '100%';
+        bottomRenderer.domElement.style.height = '100%';
+        bottomRenderer.domElement.style.display = 'block';
     }
 }
 
@@ -902,15 +949,17 @@ function setSplitScreen(enabled) {
             }
         }
 
-        // --- Bottom-right camera: focused between B_AB and B_Play ---
-        const bAB = scene.getObjectByName('B_AB');
-        const bPlay = scene.getObjectByName('B_Play');
-        if (bAB && bPlay) {
-            const posAB = new THREE.Vector3();
-            const posPlay = new THREE.Vector3();
-            bAB.getWorldPosition(posAB);
-            bPlay.getWorldPosition(posPlay);
-            const midRight = posAB.clone().add(posPlay).multiplyScalar(0.5);
+        // --- Bottom-right camera: centered on B_04/B_05/B_12/B_13, zoomed to fit B_01–B_16 ---
+        const brc_center = ['B_04', 'B_05', 'B_12', 'B_13'].map(n => scene.getObjectByName(n)).filter(Boolean);
+        const brc_zoom = ['B_01', 'B_16'].map(n => scene.getObjectByName(n)).filter(Boolean);
+        if (brc_center.length === 4 && brc_zoom.length === 2) {
+            const midRight = new THREE.Vector3();
+            brc_center.forEach(obj => {
+                const p = new THREE.Vector3();
+                obj.getWorldPosition(p);
+                midRight.add(p);
+            });
+            midRight.multiplyScalar(0.25);
 
             bottomRightCamConfig.lookX = midRight.x;
             bottomRightCamConfig.lookY = midRight.y;
@@ -928,13 +977,12 @@ function setSplitScreen(enabled) {
             bottomRightCamConfig.upY = displayUpR.y;
             bottomRightCamConfig.upZ = displayUpR.z;
 
-            // Dynamic zoom to fit both B_AB and B_Play meshes
+            // Dynamic zoom to fit B_01 and B_16
             const right = new THREE.Vector3().crossVectors(displayUpR, normal).normalize();
             const up = new THREE.Vector3().crossVectors(normal, right).normalize();
 
-            const refObjects = [bAB, bPlay];
             let minR = Infinity, maxR = -Infinity, minU = Infinity, maxU = -Infinity;
-            for (const obj of refObjects) {
+            for (const obj of brc_zoom) {
                 const bbox = new THREE.Box3().setFromObject(obj);
                 const corners = [
                     new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
@@ -971,7 +1019,7 @@ function setSplitScreen(enabled) {
             bottomRightCamConfig.posY = midRight.y + normal.y * optDist;
             bottomRightCamConfig.posZ = midRight.z + normal.z * optDist;
         } else {
-            console.warn('Bottom-right camera: could not find B_AB and/or B_Play in scene');
+            console.warn('Bottom-right camera: could not find B_04/B_05/B_12/B_13 and/or B_01/B_16 in scene');
         }
 
         modelToFadeIn.rotation.y = savedRotY;
@@ -1109,12 +1157,15 @@ function onBottomPanelClick(event, cam) {
     // Bb_Trk button click (single screen, no cycling)
     if (hit.name.startsWith('Bb_Trk')) {
         console.log('[BottomPanel] Bb_Trk clicked:', hit.name);
+        animateButtonPress(hit);
+        setBbTrkActive(hit.name);
         updateDisplays(hit.name);
         return;
     }
 
     // B_ button click (mode buttons, soft buttons, etc.)
     if (hit.name.includes('B_')) {
+        animateButtonPress(hit);
         const buttonName = hit.name;
 
         let currentState = softButtonStates.get(buttonName);
@@ -1123,12 +1174,15 @@ function onBottomPanelClick(event, cam) {
         currentState = (currentState % 3) + 1;
         softButtonStates.set(buttonName, currentState);
 
-        resetButtonLEDs(buttonName);
+        const isNumpad = /^B_\d+$/.test(buttonName);
+        if (!isNumpad) {
+            resetButtonLEDs(buttonName);
 
-        switch (currentState) {
-            case 1: setButtonLEDs([buttonName], 0, 5); break;
-            case 2: setButtonLEDs([buttonName], 5, 0); break;
-            case 3: setButtonLEDs([buttonName], 5, 5); break;
+            switch (currentState) {
+                case 1: setButtonLEDs([buttonName], 0, 5); break;
+                case 2: setButtonLEDs([buttonName], 5, 0); break;
+                case 3: setButtonLEDs([buttonName], 5, 5); break;
+            }
         }
 
         updateDisplays(`${buttonName}_0${currentState}`);
@@ -1348,6 +1402,8 @@ function checkIntersections(isClick = false) {
     // --- Bb_Trk BUTTON CLICK (single screen, no cycling) ---
     if (isClick && hoveredInteractive && hoveredInteractive.name.startsWith('Bb_Trk')) {
         console.log('[Main] Bb_Trk clicked:', hoveredInteractive.name);
+        animateButtonPress(hoveredInteractive);
+        setBbTrkActive(hoveredInteractive.name);
         updateDisplays(hoveredInteractive.name);
         selectedObject = null;
         outlinePass.selectedObjects = [];
@@ -1356,6 +1412,7 @@ function checkIntersections(isClick = false) {
 
     // --- SOFT BUTTON CLICK LOGIC --
     if (isClick && hoveredInteractive && hoveredInteractive.name.includes('B_')) {
+        animateButtonPress(hoveredInteractive);
         const buttonName = hoveredInteractive.name;
 
         // 1. Get the current state (e.g., 1 for Red)
@@ -1369,10 +1426,13 @@ function checkIntersections(isClick = false) {
 
         console.log(`${buttonName} clicked. New state: ${currentState}`);
 
-        // 3. Apply the new emission intensity based on the state
-        resetButtonLEDs(buttonName); // Reset other buttons in the group first
+        // 3. Apply the new emission intensity based on the state (skip for B_01–B_16)
+        const isNumpad = /^B_\d+$/.test(buttonName);
+        if (!isNumpad) {
+            resetButtonLEDs(buttonName); // Reset other buttons in the group first
+        }
 
-        switch (currentState) {
+        if (!isNumpad) switch (currentState) {
             case 1:
                 setButtonLEDs([buttonName], 0, 5);
                 break;
@@ -1437,8 +1497,10 @@ window._retriggerDisplayZoom = function () {
 function animate() {
     requestAnimationFrame(animate);
 
-    // --- PULSE LOGIC ---
     const elapsedTime = clock.getElapsedTime();
+
+    // --- BUTTON PRESS ANIMATIONS ---
+    updateButtonAnimations();
     const pulseFactor = Math.sin(elapsedTime * PULSE_SPEED) * 0.5 + 0.5;
     const newIntensity = PULSE_MIN_INTENSITY + (PULSE_MAX_INTENSITY - PULSE_MIN_INTENSITY) * pulseFactor;
     ambientLight.intensity = newIntensity;
