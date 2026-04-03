@@ -1191,7 +1191,11 @@ function onBottomPanelClick(event, cam) {
             }
         }
 
-        updateDisplays(`${buttonName}_0${currentState}`);
+        if (isNumpad) {
+            updateDisplays('STEP_EX');
+        } else {
+            updateDisplays(`${buttonName}_0${currentState}`);
+        }
     }
 }
 
