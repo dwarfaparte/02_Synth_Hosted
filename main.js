@@ -1171,6 +1171,7 @@ function onBottomPanelClick(event, cam) {
     // B_ button click (mode buttons, soft buttons, etc.)
     if (hit.name.includes('B_')) {
         animateButtonPress(hit);
+        setBbTrkActive(null); // Turn off blue glow on both Bb_Trk buttons
         const buttonName = hit.name;
 
         let currentState = softButtonStates.get(buttonName);
@@ -1418,6 +1419,7 @@ function checkIntersections(isClick = false) {
     // --- SOFT BUTTON CLICK LOGIC --
     if (isClick && hoveredInteractive && hoveredInteractive.name.includes('B_')) {
         animateButtonPress(hoveredInteractive);
+        setBbTrkActive(null); // Turn off blue glow on both Bb_Trk buttons
         const buttonName = hoveredInteractive.name;
 
         // 1. Get the current state (e.g., 1 for Red)
@@ -1449,8 +1451,12 @@ function checkIntersections(isClick = false) {
                 break;
         }
 
-        // Update display: state number maps to screen suffix (1=_01, 2=_02, 3=_03)
-        updateDisplays(`${buttonName}_0${currentState}`);
+        // Update display: numpad buttons show STEP_EX, others use state suffix
+        if (isNumpad) {
+            updateDisplays('STEP_EX');
+        } else {
+            updateDisplays(`${buttonName}_0${currentState}`);
+        }
         // --- END NEW ---
 
         // Clear hover/selection effect immediately after click
