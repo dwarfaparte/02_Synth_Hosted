@@ -31,7 +31,6 @@ const INERTIA_DAMPING = 0.97; // <-- ADD: Friction (0.9 = fast stop, 0.99 = long
 const DRAG_SENSITIVITY = 0.005; // <-- ADD: Your existing sensitivity as a constant
 
 // Display and Data Variables
-let debugDisplayElement;
 let knobDescriptions = new Map();
 let softButtonStates = new Map(); // Key: Object Name (e.g., 'soft1'), Value: State (0, 1, or 2)
 
@@ -107,20 +106,33 @@ function resetButtonLEDs(targetButton) {
 
 
 // Highlights the active Bb_Trk button with a blue glow, dims the other.
+const _bbTrkColor = new THREE.Color(0x48f9ff);
+const _bbTrkMaterialsCache = new Map();
+
+function _getBbTrkMaterials(name) {
+    if (_bbTrkMaterialsCache.has(name)) return _bbTrkMaterialsCache.get(name);
+    const obj = scene.getObjectByName(name);
+    if (!obj) return null;
+    const mats = [];
+    obj.traverse(child => {
+        if (!child.isMesh) return;
+        const childMats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.push(...childMats);
+    });
+    _bbTrkMaterialsCache.set(name, mats);
+    return mats;
+}
+
 function setBbTrkActive(activeName) {
     const buttons = ['Bb_Trk1', 'Bb_Trk2'];
     buttons.forEach(name => {
-        const obj = scene.getObjectByName(name);
-        if (!obj) return;
+        const mats = _getBbTrkMaterials(name);
+        if (!mats) return;
         const isActive = name === activeName;
-        obj.traverse(child => {
-            if (!child.isMesh) return;
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
-            mats.forEach(mat => {
-                mat.emissive = new THREE.Color(0x48f9ff);
-                mat.emissiveIntensity = isActive ? 1.2 : 0;
-                mat.needsUpdate = true;
-            });
+        mats.forEach(mat => {
+            mat.emissive = _bbTrkColor;
+            mat.emissiveIntensity = isActive ? 1.2 : 0;
+            mat.needsUpdate = true;
         });
     });
 }
@@ -130,45 +142,46 @@ function setBbTrkActive(activeName) {
 // @param {number} greenIntensity - The desired emissive intensity for the green LED.
 // @param {number} redIntensity - The desired emissive intensity for the red LED.
 
+const _ledMaterialCache = new Map();
+
+function _getLEDMaterials(buttonName) {
+    if (_ledMaterialCache.has(buttonName)) return _ledMaterialCache.get(buttonName);
+
+    const buttonObject = scene.getObjectByName(buttonName);
+    if (!buttonObject) return null;
+
+    let redLED = null, greenLED = null;
+    buttonObject.traverse((child) => {
+        if (child.isMesh) {
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(mat => {
+                if (mat.name.includes('redLED')) redLED = mat;
+                if (mat.name.includes('greenLED')) greenLED = mat;
+            });
+        }
+    });
+
+    if (redLED && greenLED) {
+        const entry = { red: redLED, green: greenLED };
+        _ledMaterialCache.set(buttonName, entry);
+        return entry;
+    }
+    return null;
+}
+
 function setButtonLEDs(buttonNames, greenIntensity, redIntensity) {
-    if (!modelToFadeIn) return; // Make sure the model is loaded
+    if (!modelToFadeIn) return;
 
     for (const buttonName of buttonNames) {
-        // Find the button object in the scene
-        const buttonObject = scene.getObjectByName(buttonName);
-
-        if (!buttonObject) {
-            console.warn(`setButtonLEDs: Button "${buttonName}" not found.`);
-            continue; // Skip to the next button name
-        }
-
-        let redLEDMaterial = null;
-        let greenLEDMaterial = null;
-
-        // Find the LED materials (using the same logic as your onMouseClick handler)
-        buttonObject.traverse((child) => {
-            if (child.isMesh) {
-                // This handles both single and multi-material meshes
-                const materials = Array.isArray(child.material) ? child.material : [child.material];
-
-                materials.forEach(mat => {
-                    if (mat.name.includes('redLED')) redLEDMaterial = mat;
-                    if (mat.name.includes('greenLED')) greenLEDMaterial = mat;
-                });
-            }
-        });
-
-        // Set the new intensities
-        if (redLEDMaterial && greenLEDMaterial) {
-            redLEDMaterial.emissiveIntensity = redIntensity;
-            greenLEDMaterial.emissiveIntensity = greenIntensity;
-
-            // IMPORTANT: Tell Three.js to update the materials
-            redLEDMaterial.needsUpdate = true;
-            greenLEDMaterial.needsUpdate = true;
-        } else {
+        const leds = _getLEDMaterials(buttonName);
+        if (!leds) {
             console.warn(`setButtonLEDs: Could not find LED materials for button: ${buttonName}`);
+            continue;
         }
+        leds.red.emissiveIntensity = redIntensity;
+        leds.green.emissiveIntensity = greenIntensity;
+        leds.red.needsUpdate = true;
+        leds.green.needsUpdate = true;
     }
 }
 
@@ -206,10 +219,18 @@ async function loadKnobData() {
  * @param {number} [height=128] - Canvas height.
  * @returns {THREE.CanvasTexture}
  */
+const _canvasCache = new Map();
 function createTextTexture(displayName, textArray, width = 512, height = 128) {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    let canvas;
+    const cacheKey = `${displayName}_${width}_${height}`;
+    if (_canvasCache.has(cacheKey)) {
+        canvas = _canvasCache.get(cacheKey);
+    } else {
+        canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        _canvasCache.set(cacheKey, canvas);
+    }
 
     const ctx = canvas.getContext('2d');
 
@@ -578,19 +599,12 @@ function updateDisplays(screenKey) {
 
 // Start loading knob and display data
 loadKnobData();
-displayScreensPromise = loadAllDisplayScreens(); // 
-// --- NEW: createTextTexture function restored ---
-// ... (Your existing createTextTexture function starts here, no changes needed) ...
-
-// Start loading knob data
-loadKnobData();
+displayScreensPromise = loadAllDisplayScreens();
 
 // Camera Functions
 // --- PULSE VARIABLES ---
 let clock = new THREE.Clock();
-const PULSE_MIN_INTENSITY = 8;
-const PULSE_MAX_INTENSITY = 8.5;
-const PULSE_SPEED = 2;
+const AMBIENT_INTENSITY = 8;
 
 // --- FADE-IN & ZOOM-IN VARIABLES ---
 let modelToFadeIn;
@@ -605,9 +619,6 @@ const MAX_ZOOM_RADIUS = 70;
 const EASE_FACTOR = 0.02;
 const DEFAULT_ROTATION_X = THREE.MathUtils.degToRad(330);
 let currentRadius = INITIAL_RADIUS;
-
-// --- CAMERA FOCUS VARIABLES ---
-let oldTargetCameraUp = new THREE.Vector3(0, 1, 0); // <-- ADD THIS LINE
 
 // --- CAMERA FOCUS VARIABLES ---
 let isCameraFocused = false; // Is the camera in a zoomed-in, focused state?
@@ -704,7 +715,7 @@ textureLoader.load(
 );
 
 // 2. Add Lighting
-let ambientLight = new THREE.AmbientLight(0xffffff, PULSE_MIN_INTENSITY);
+let ambientLight = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
 scene.add(ambientLight);
 
 const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
@@ -727,52 +738,7 @@ loader.load(
         // --- 2. AWAIT YOUR DISPLAY DATA ---
         await displayScreensPromise;
 
-        // --- 3. MODIFY THE TRAVERSE LOGIC ---
-        modelToFadeIn.traverse((child) => {
-            if (child.isMesh && child.material) {
-
-                // --- - Add lights to ALL emissive materials ---
-                // This helper function checks a material and adds a light if needed
-                let addLights = false; // <-- Set to false to disable emissive lights
-                if (!addLights) return; // Skip if disabled
-                const addLightIfEmissive = (material) => {
-                    // Check if material is emissive (color is not black AND intensity > 0)
-                    if (material.emissive && material.emissiveIntensity > 0 && material.emissive.getHex() !== 0) {
-                        // --- Create the PointLight ---
-                        const light = new THREE.PointLight(
-                            material.emissive.clone(),    // Use the material's emissive color
-                            material.emissiveIntensity * 1.0, // Tweak this intensity multiplier!
-                            10 // Tweak this distance! (0 = infinite)
-                        );
-
-                        // Place the light at the center of the mesh
-                        light.position.set(0, 0, 0);
-
-                        // Parent the light to the mesh so it moves with it
-                        child.add(light);
-
-                        console.log(`Added PointLight to emissive mesh: ${child.name}`);
-                    }
-                };
-
-                // Run the helper function on the mesh's material(s)
-                if (Array.isArray(child.material)) {
-                    child.material.forEach(addLightIfEmissive);
-                } else {
-                    addLightIfEmissive(child.material);
-                }
-                // --- End of Block 2 ---
-            }
-        });
-
         scene.add(modelToFadeIn);
-
-        // Debug: log all object names containing 'Bb' or 'Trk'
-        modelToFadeIn.traverse((child) => {
-            if (child.name && (child.name.includes('Bb') || child.name.toLowerCase().includes('trk'))) {
-                console.log('[ModelDebug] Found object:', child.name, '| type:', child.type);
-            }
-        });
 
         // Set Button initial states
         const Start_Group = ['B_Soft01', 'B_Soft05', 'B_TimeMod'];
@@ -871,8 +837,7 @@ composer.addPass(outlinePass);
 
 // Cinematic Grain Custom Pass
 const grainPass = new ShaderPass(CinematicGrainShader);
-grainPass.uniforms['amount'].value = 0.08; // ADJUST THIS: Lower (0.02) = cleaner, Higher (0.1) = grittier
-grainPass.renderToScreen = true;
+grainPass.uniforms['amount'].value = 0.08;
 composer.addPass(grainPass);
 
 // --- SPLIT-SCREEN FUNCTION ---
@@ -1112,18 +1077,21 @@ function onMouseClick(event) {
 renderer.domElement.addEventListener('click', onMouseClick, false);
 
 // --- Bottom panel click handlers ---
+const _bottomMouse = new THREE.Vector2();
+const _bottomRaycaster = new THREE.Raycaster();
+
 function onBottomPanelClick(event, cam) {
     if (!modelToFadeIn) return;
 
     const canvas = event.target;
     const rect = canvas.getBoundingClientRect();
-    const mx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const my = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    _bottomMouse.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
 
-    const bottomMouse = new THREE.Vector2(mx, my);
-    const bottomRaycaster = new THREE.Raycaster();
-    bottomRaycaster.setFromCamera(bottomMouse, cam);
-    const intersects = bottomRaycaster.intersectObject(modelToFadeIn, true);
+    _bottomRaycaster.setFromCamera(_bottomMouse, cam);
+    const intersects = _bottomRaycaster.intersectObject(modelToFadeIn, true);
 
     if (intersects.length === 0) return;
 
@@ -1262,7 +1230,7 @@ renderer.domElement.addEventListener('mouseleave', onDragEnd, false);
 let scrollHappened = false;
 
 // The listener just sets the flag to true
-window.addEventListener('wheel', (event) => {
+window.addEventListener('wheel', () => {
     scrollHappened = 10;
 })
 
@@ -1297,12 +1265,7 @@ function checkIntersections(isClick = false) {
                     || objectToCheck.name === 'Display02'
                     || objectToCheck.name.includes('B_')
                     || objectToCheck.name.startsWith('Bb_Trk')) {
-                    hoveredInteractive = objectToCheck; // Found an object
-                    console.log('Hovered object name:', objectToCheck.name);
-                    const worldPos = new THREE.Vector3();
-                    hoveredInteractive.updateMatrixWorld(true)
-                    hoveredInteractive.getWorldPosition(worldPos);
-                    console.log(`${hoveredInteractive.name} world position: x=${worldPos.x.toFixed(3)}, y=${worldPos.y.toFixed(3)}, z=${worldPos.z.toFixed(3)}`, worldPos);
+                    hoveredInteractive = objectToCheck;
                     break;
                 }
             }
@@ -1487,12 +1450,7 @@ function animate() {
 
     // --- BUTTON PRESS ANIMATIONS ---
     updateButtonAnimations();
-    const pulseFactor = Math.sin(elapsedTime * PULSE_SPEED) * 0.5 + 0.5;
-    const newIntensity = PULSE_MIN_INTENSITY + (PULSE_MAX_INTENSITY - PULSE_MIN_INTENSITY) * pulseFactor;
-    ambientLight.intensity = newIntensity;
 
-    // --- BLINK LOGIC ---
-    const isBlinkOn = (Math.floor(elapsedTime * 2) % 2 === 0);
     scrollHappened -= 1
     if (scrollHappened <= 0) {
         scrollHappened = 0
@@ -1588,59 +1546,9 @@ function animate() {
     camera.up.copy(lerpedCameraUp); // 
     camera.lookAt(lerpedLookAt);
 
-    if (!oldTargetCameraUp.equals(oldTargetCameraUp)) {
-        // The value has changed since the last frame!
-        console.warn('targetCameraUp CHANGED!');
-        console.log('Old:', oldTargetCameraUp.x, oldTargetCameraUp.y, oldTargetCameraUp.z);
-        console.log('New:', targetCameraUp.x, targetCameraUp.y, targetCameraUp.z);
-
-        // This is the breakpoint you wanted:
-        debugger;
-
-        // Update the "old" value to the "new" value for the next frame
-        oldTargetCameraUp.copy(targetCameraUp);
-    }
-
     // --- Call Raycasting Logic ---
     if (modelToFadeIn) {
         checkIntersections(false);
-
-        // --- REVISED DEBUG BLOCK (FOR CAMERA) ---
-        if (debugDisplayElement) {
-
-            const hoveredName = hoveredInteractive ? hoveredInteractive.name : "null";
-
-            // --- Camera Data ---
-            const camX = camera.position.x.toFixed(2);
-            const camY = camera.position.y.toFixed(2);
-            const camZ = camera.position.z.toFixed(2);
-
-            // THIS IS THE LIKELY CULPRIT
-            const upX = camera.up.x.toFixed(2);
-            const upY = camera.up.y.toFixed(2);
-            const upZ = camera.up.z.toFixed(2);
-
-            const targetUpX = targetCameraUp.x.toFixed(2);
-            const targetUpY = targetCameraUp.y.toFixed(2);
-            const targetUpZ = targetCameraUp.z.toFixed(2);
-
-            const lookX = lerpedLookAt.x.toFixed(2);
-            const lookY = lerpedLookAt.y.toFixed(2);
-            const lookZ = lerpedLookAt.z.toFixed(2);
-
-            // Update textContent with camera info
-            debugDisplayElement.textContent = `--- STATES ---
-            isCameraFocused: ${isCameraFocused}
-            isTransitioning: ${isCameraTransitioning}
-            scrollHappened: ${scrollHappened}
-            hovered: ${hoveredName}
-            --- CAMERA ---
-            Cam Pos: ${camX}, ${camY}, ${camZ}
-            Cam Up: ${upX}, ${upY}, ${upZ}
-            Target Up: ${targetUpX}, ${targetUpY}, ${targetUpZ}
-            LookAt: ${lookX}, ${lookY}, ${lookZ}`;
-        }
-        // --- END REVISED BLOCK ---
     }
 
     // Update Grain Time
@@ -1664,9 +1572,6 @@ function animate() {
         bottomRightRenderer.render(scene, bottomRightCamera);
     }
 }
-
-// --- Get Display Element from DOM ---
-debugDisplayElement = document.getElementById('debug-display');
 
 // --- Fullscreen & Landscape Lock Logic ---
 const startOverlay = document.getElementById('start-overlay');
