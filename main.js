@@ -19,9 +19,6 @@ const B_Group_2 = ['B_Soft05', 'B_Soft06', 'B_Soft07', 'B_Soft08'];
 const B_Group_3 = ['B_TimeMod', 'B_Gate', 'B_Accent', 'B_Glide', 'B_Octave', 'B_NoteSynth'];
 const B_Group_Mode = ['B_Seq', 'B_Samp', 'B_Snth', 'B_Perf'];
 
-// Display mode tracking
-let activeMode = 'B_Seq';
-let activeSoftPage = '01';
 
 //  Drag and Rotation Variablse
 let isDragging = false;
@@ -57,26 +54,6 @@ function resetButtonLEDs(targetButton) {
     }
 }
 
-// Updates Bb_Soft button appearance: reduces reflectivity on all, brightens the active one.
-function setBbSoftActive(activePageNum) {
-    const buttons = ['Bb_Soft_01', 'Bb_Soft_02', 'Bb_Soft_03', 'Bb_Soft_04'];
-    buttons.forEach(name => {
-        const obj = scene.getObjectByName(name);
-        if (!obj) return;
-        const isActive = name.endsWith(`_${activePageNum}`);
-        obj.traverse(child => {
-            if (!child.isMesh) return;
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
-            mats.forEach(mat => {
-                mat.roughness = 0.85;
-                mat.metalness = 0.1;
-                mat.emissive = new THREE.Color(0x48f9ff);
-                mat.emissiveIntensity = isActive ? 1.2 : 0;
-                mat.needsUpdate = true;
-            });
-        });
-    });
-}
 
 // Sets the LED brightness for a list of soft buttons by name.
 // @param {string[]} buttonNames - An array of button names (e.g., ['Soft01', 'Soft02']).
@@ -372,8 +349,14 @@ function parseDisplayCSV(csvText) {
     // (Each screen block is 6 columns wide: Key + 4 data cols + 1 blank separator col)
     for (let col = 0; col < headerParts.length; col += 6) {
 
-        // The screen key is in the 2nd column of the block (e.g., B_TimeMod_Red)
-        const screenKey = headerParts[col + 1];
+        // The screen key is in the 1st column of the block (e.g., B_TimeMod_Red)
+        // Try col+1 first (legacy format with leading comma), fall back to col+0
+        let screenKey = headerParts[col + 1];
+        let dataOffset = col + 1;
+        if (!screenKey && headerParts[col]) {
+            screenKey = headerParts[col];
+            dataOffset = col;
+        }
 
         // If no key, it's an empty block, so skip it
         if (!screenKey) {
@@ -383,14 +366,14 @@ function parseDisplayCSV(csvText) {
         // --- Extract Display 01 Data ---
         // Get the 6x4 grid for this specific screen
         const d1Grid = d1DataLines.map(rowParts =>
-            rowParts.slice(col + 1, col + 5) // Get 4 data columns
+            rowParts.slice(dataOffset, dataOffset + 4) // Get 4 data columns
         );
         const processedD1Grid = processGridData(d1Grid); // Use existing helper
 
         // --- Extract Display 02 Data ---
         // Get the 6x4 grid for this specific screen from the D2 lines
         const d2Grid = d2DataLines.map(rowParts =>
-            rowParts.slice(col + 1, col + 5) // Get 4 data columns
+            rowParts.slice(dataOffset, dataOffset + 4) // Get 4 data columns
         );
         const processedD2Grid = processGridData(d2Grid); // Use existing helper
 
@@ -473,8 +456,7 @@ function updateDisplays(screenKey) {
     // --- Helper to update a specific display ---
     const updateSingleDisplay = (mesh, displayDataMap, displayName) => {
         if (!mesh) {
-            console.warn(`updateDisplays: Could not find mesh for ${displayName}.`);
-            return;
+            return; // Mesh not present in this model, skip silently
         }
 
         if (!displayDataMap) {
@@ -715,6 +697,13 @@ loader.load(
 
         scene.add(modelToFadeIn);
 
+        // Debug: log all object names containing 'Bb' or 'Trk'
+        modelToFadeIn.traverse((child) => {
+            if (child.name && (child.name.includes('Bb') || child.name.toLowerCase().includes('trk'))) {
+                console.log('[ModelDebug] Found object:', child.name, '| type:', child.type);
+            }
+        });
+
         // Set Button initial states
         const Start_Group = ['B_Soft01', 'B_Soft05', 'B_TimeMod'];
 
@@ -730,7 +719,6 @@ loader.load(
         softButtonStates.set('B_Seq', 2);
         updateDisplays("B_Seq_01");
         setTimeout(() => updateDisplays("B_Seq_01"), 500);
-        setBbSoftActive('01');
     },
     undefined,
     function (error) {
@@ -1089,20 +1077,23 @@ function onBottomPanelClick(event, cam) {
     // Walk up to find an interactive object
     let hit = null;
     let objectToCheck = intersects[0].object;
+    console.log('[BottomPanel] Raycast hit raw object:', intersects[0].object.name);
     while (objectToCheck) {
         if (objectToCheck.name) {
+            console.log('[BottomPanel] Checking ancestor:', objectToCheck.name);
             if (objectToCheck.name.includes('Knob')
                 || objectToCheck.name === 'Display01'
                 || objectToCheck.name === 'Display02'
                 || objectToCheck.name.includes('B_')
-                || objectToCheck.name.startsWith('Bb_')) {
+                || objectToCheck.name.startsWith('Bb_Trk')) {
                 hit = objectToCheck;
                 break;
             }
         }
         objectToCheck = objectToCheck.parent;
     }
-    if (!hit) return;
+    if (!hit) { console.log('[BottomPanel] No interactive object found.'); return; }
+    console.log('[BottomPanel] Hit:', hit.name);
 
     // Display cell edit
     if (hit.name === 'Display01' || hit.name === 'Display02') {
@@ -1115,12 +1106,10 @@ function onBottomPanelClick(event, cam) {
         return;
     }
 
-    // Bb_Soft page select
-    if (hit.name.startsWith('Bb_Soft_')) {
-        const pageNum = hit.name.split('_').pop();
-        activeSoftPage = pageNum;
-        updateDisplays(`${activeMode}_${activeSoftPage}`);
-        setBbSoftActive(pageNum);
+    // Bb_Trk button click (single screen, no cycling)
+    if (hit.name.startsWith('Bb_Trk')) {
+        console.log('[BottomPanel] Bb_Trk clicked:', hit.name);
+        updateDisplays(hit.name);
         return;
     }
 
@@ -1243,7 +1232,7 @@ function checkIntersections(isClick = false) {
                     || objectToCheck.name === 'Display01'
                     || objectToCheck.name === 'Display02'
                     || objectToCheck.name.includes('B_')
-                    || objectToCheck.name.startsWith('Bb_')) {
+                    || objectToCheck.name.startsWith('Bb_Trk')) {
                     hoveredInteractive = objectToCheck; // Found an object
                     console.log('Hovered object name:', objectToCheck.name);
                     const worldPos = new THREE.Vector3();
@@ -1356,12 +1345,10 @@ function checkIntersections(isClick = false) {
         return; // Stop processing, we've handled the display click
     }
 
-    // --- Bb_Soft PAGE SELECT LOGIC ---
-    if (isClick && hoveredInteractive && hoveredInteractive.name.startsWith('Bb_Soft_')) {
-        const pageNum = hoveredInteractive.name.split('_').pop(); // '01', '02', '03', '04'
-        activeSoftPage = pageNum;
-        updateDisplays(`${activeMode}_${activeSoftPage}`);
-        setBbSoftActive(pageNum);
+    // --- Bb_Trk BUTTON CLICK (single screen, no cycling) ---
+    if (isClick && hoveredInteractive && hoveredInteractive.name.startsWith('Bb_Trk')) {
+        console.log('[Main] Bb_Trk clicked:', hoveredInteractive.name);
+        updateDisplays(hoveredInteractive.name);
         selectedObject = null;
         outlinePass.selectedObjects = [];
         return;
